@@ -1,0 +1,5 @@
+# The English README travels with the package because `readme = "README.md"` names
+# it. These two are linked *from* it, and a link that 404s inside a source
+# distribution is a worse answer than a few extra kilobytes.
+include README.pt-BR.md
+include RELEASING.md

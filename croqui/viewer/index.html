@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>croqui</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<svg id="canvas"><g id="scene"></g></svg>
+
+<section id="doc" hidden>
+  <nav id="doc-list" aria-label="documentos"></nav>
+  <div id="doc-main">
+    <header id="doc-head"><button class="btn" id="doc-back" type="button" hidden>← todos os PRDs</button><h2 id="doc-title"></h2><span id="doc-file"></span></header>
+    <article id="doc-body"></article>
+  </div>
+</section>
+
+<div id="toolbar">
+  <div id="brand">croqui<small id="meta"></small></div>
+  <div class="chips" id="tabs" role="tablist">
+    <button class="chip tab" data-tab="map" role="tab" aria-selected="true">mapa</button>
+  </div>
+  <input id="search" type="search" placeholder="buscar rota, tabela, service…  ( / )" autocomplete="off">
+  <div class="chips" id="method-chips">
+    <button class="chip" data-method="GET"    aria-pressed="false" style="--chip-color:var(--get)">GET</button>
+    <button class="chip" data-method="POST"   aria-pressed="false" style="--chip-color:var(--post)">POST</button>
+    <button class="chip" data-method="PATCH"  aria-pressed="false" style="--chip-color:var(--patch)">PATCH</button>
+    <button class="chip" data-method="PUT"    aria-pressed="false" style="--chip-color:var(--put)">PUT</button>
+    <button class="chip" data-method="DELETE" aria-pressed="false" style="--chip-color:var(--delete)">DELETE</button>
+  </div>
+  <button class="chip ghost" id="expand-all" aria-pressed="false">expandir tudo</button>
+  <button class="chip ghost" id="toggle-internal" aria-pressed="false">internas</button>
+  <button class="chip ghost" id="toggle-hover" aria-pressed="false" title="escurecer o resto do mapa ao passar o mouse — clicar num quadro fixa o realce nele">realce</button>
+  <button class="chip ghost" id="hand" aria-pressed="false" title="fonte manuscrita">✍</button>
+  <button class="btn" id="clear-focus" hidden></button>
+  <button class="chip picked" id="marked" hidden></button>
+  <button class="chip warn" id="orphans" hidden></button>
+  <div class="spacer"></div>
+  <button class="btn icon" id="undo" title="desfazer (Ctrl+Z)" disabled>↶</button>
+  <button class="btn icon" id="redo" title="refazer (Ctrl+Shift+Z)" disabled>↷</button>
+  <button class="btn" id="fit" title="ajustar à tela (f)">ajustar</button>
+  <button class="btn" id="reset">limpar edições</button>
+  <button class="btn primary" id="save" title="gravar em .croqui/layout.json (Ctrl+S)" disabled>salvo</button>
+</div>
+
+<div id="tools" role="toolbar" aria-label="ferramentas de desenho">
+  <button class="tool" data-tool="select" aria-pressed="true" title="selecionar  (v)">
+    <svg viewBox="0 0 20 20"><path d="M5 3l9.5 8.2-4.4.5-1.8 4.1z" fill="currentColor" stroke="none"/></svg>
+  </button>
+  <hr>
+  <button class="tool" data-tool="rect" aria-pressed="false" title="retângulo  (r)">
+    <svg viewBox="0 0 20 20"><rect x="3" y="5" width="14" height="10" rx="1.2"/></svg>
+  </button>
+  <button class="tool" data-tool="ellipse" aria-pressed="false" title="elipse  (o)">
+    <svg viewBox="0 0 20 20"><ellipse cx="10" cy="10" rx="7.5" ry="5.6"/></svg>
+  </button>
+  <button class="tool" data-tool="diamond" aria-pressed="false" title="losango  (d)">
+    <svg viewBox="0 0 20 20"><path d="M10 3l7 7-7 7-7-7z"/></svg>
+  </button>
+  <button class="tool" data-tool="triangle" aria-pressed="false" title="triângulo  (t)">
+    <svg viewBox="0 0 20 20"><path d="M10 4l7 12H3z"/></svg>
+  </button>
+  <button class="tool" data-tool="hexagon" aria-pressed="false" title="hexágono  (h)">
+    <svg viewBox="0 0 20 20"><path d="M6.5 4h7l3.5 6-3.5 6h-7L3 10z"/></svg>
+  </button>
+  <button class="tool" data-tool="cylinder" aria-pressed="false" title="cilindro / tabela  (c)">
+    <svg viewBox="0 0 20 20"><path d="M4 6v8c0 1.5 2.7 2.6 6 2.6s6-1.1 6-2.6V6"/><ellipse cx="10" cy="6" rx="6" ry="2.6"/></svg>
+  </button>
+  <button class="tool" data-tool="cloud" aria-pressed="false" title="nuvem  (n)">
+    <svg viewBox="0 0 20 20"><path d="M6.4 15.4a3.3 3.3 0 01.3-6.6 4.4 4.4 0 018.4-1.2 3.4 3.4 0 01-.4 7.8z"/></svg>
+  </button>
+  <hr>
+  <button class="tool" data-tool="arrow" aria-pressed="false" title="seta  (a)">
+    <svg viewBox="0 0 20 20"><path d="M3.5 16.5L16 4.5M16 4.5h-5.4M16 4.5v5.4"/></svg>
+  </button>
+  <button class="tool" data-tool="line" aria-pressed="false" title="linha  (l)">
+    <svg viewBox="0 0 20 20"><path d="M3.5 16.5L16.5 3.5"/></svg>
+  </button>
+  <button class="tool" data-tool="text" aria-pressed="false" title="caixa de texto  (x, ou duplo-clique no papel)">
+    <svg viewBox="0 0 20 20"><path d="M4 5.5h12M10 5.5v10"/></svg>
+  </button>
+  <button class="tool" data-tool="link" aria-pressed="false" title="nova relação entre dois nós  (e)">
+    <svg viewBox="0 0 20 20"><circle cx="4.6" cy="14.4" r="2.4"/><circle cx="15.4" cy="5.6" r="2.4"/><path d="M6.6 12.8l6.9-5.6"/></svg>
+  </button>
+</div>
+
+<div id="inspector" hidden>
+  <div class="ins-row" id="ins-colors"></div>
+  <div class="ins-row" id="ins-size">
+    <button class="mini" data-size="-1" title="letra menor">A<sup>−</sup></button>
+    <span id="ins-size-val">13px</span>
+    <button class="mini" data-size="1" title="letra maior">A<sup>+</sup></button>
+  </div>
+  <div class="ins-row" id="ins-fill"><button class="mini" data-flag="fill" aria-pressed="false">preenchida</button></div>
+  <div class="ins-row" id="ins-dash-row"><button class="mini" id="ins-dash" data-flag="dash" aria-pressed="false">tracejada</button></div>
+  <div class="ins-row" id="ins-heads">
+    <button class="mini" data-heads="end" aria-pressed="true" title="ponta no fim">→</button>
+    <button class="mini" data-heads="both" aria-pressed="false" title="ponta nos dois lados">↔</button>
+    <button class="mini" data-heads="none" aria-pressed="false" title="sem ponta">—</button>
+  </div>
+  <div class="ins-row" id="ins-label-row">
+    <input id="ins-label" type="text" placeholder="rótulo da relação" autocomplete="off">
+  </div>
+  <div class="ins-row" id="ins-layer"><button class="mini" data-flag="front" aria-pressed="false">à frente</button></div>
+  <div class="ins-row" id="ins-anchor"><button class="mini" data-flag="anchor" aria-pressed="false">prender ao nó</button></div>
+  <div class="ins-row" id="ins-delete"><button class="mini danger" data-del="1">apagar  (Del)</button></div>
+  <div class="ins-row hintrow" id="ins-hint">arraste no papel para desenhar</div>
+</div>
+
+<aside id="panel">
+  <button class="widen" title="alargar painel" aria-label="alargar painel">⇤</button>
+  <button class="close" aria-label="fechar">×</button>
+  <div id="panel-body"></div>
+</aside>
+
+<div id="hint">
+  <b>clique num grupo</b> expande os endpoints · <b>espaço+arrastar</b> navega · <b>roda</b> zoom<br>
+  <b>arrastar no papel</b> seleciona · <b>shift</b> soma · <b>Ctrl+A</b> tudo — arraste um item para mover todos<br>
+  <b>duplo-clique</b> no papel cria uma caixa de texto, num desenho escreve dentro dele<br>
+  <b>Ctrl+V</b> cola imagem, texto ou um desenho do Excalidraw onde o cursor está<br>
+  <b>Del</b> apaga o selecionado · <b>Ctrl+Z</b> desfaz · <b>Ctrl+S</b> grava
+</div>
+
+<div id="legend" aria-label="legenda"></div>
+
+<div id="toast"></div>
+
+<script src="diagram.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

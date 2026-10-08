@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "croqui"
+dynamic = ["version"]
+description = "Sketch-style interactive maps of any API and the database it touches, generated from source."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Guilherme Mileib" }]
+keywords = [
+  "api", "documentation", "diagram", "openapi", "database", "visualization",
+  "mermaid", "prd", "uml", "mcp", "llm", "claude", "fastapi",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Documentation",
+  "Topic :: Documentation",
+]
+# Zero runtime dependencies on purpose: stdlib only, so `pipx install croqui`
+# never drags a toolchain into anyone's machine.
+dependencies = []
+
+[project.optional-dependencies]
+# Only needed for `croqui enrich --engine api`. The default engine drives the
+# already-authenticated `claude` CLI, so most users never install this.
+api = ["anthropic>=0.60"]
+
+[project.scripts]
+croqui = "croqui.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/guimileib/croqui"
+Repository = "https://github.com/guimileib/croqui"
+Issues = "https://github.com/guimileib/croqui/issues"
+
+[tool.setuptools]
+packages = ["croqui", "croqui.adapters"]
+
+[tool.setuptools.package-data]
+croqui = ["viewer/*.html", "viewer/*.js", "viewer/*.css"]
+
+# The version lives only in croqui/__init__.py — bump it there and nowhere else.
+[tool.setuptools.dynamic]
+version = { attr = "croqui.__version__" }

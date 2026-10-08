@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+.croqui/cache.json
+.croqui/graph.prev.json
+shot.png
+
+#gsd
+.planning
+
