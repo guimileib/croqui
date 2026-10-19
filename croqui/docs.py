@@ -90,7 +90,7 @@ def collect_section(root: Path, section: str) -> list[dict]:
                 continue
             if not text.strip():
                 continue
-            rel = str(path.relative_to(root))
+            rel = path.relative_to(root).as_posix()
             if rel in seen:
                 continue
             seen.add(rel)

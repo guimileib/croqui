@@ -39,6 +39,30 @@
 
   var NODE_ID = /^[A-Za-z0-9_.\-#]+/;
 
+  /* Colour. `A:::service` (or `class A service`) with one of these names paints the
+   * node in croqui's own palette, so it follows the light/dark theme and costs a
+   * model no `classDef` lines. Any other class needs a `classDef`. */
+  var PALETTE = {
+    route: 1, service: 1, repo: 1, table: 1, external: 1,
+    get: 1, post: 1, put: 1, patch: 1, "delete": 1,
+    ok: 1, warn: 1, danger: 1, muted: 1, accent: 1,
+  };
+  var COLOR_VALUE = /^(#[0-9a-f]{3,8}|(rgb|rgba|hsl|hsla)\([0-9.,%\s]+\)|[a-z]{3,20})$/i;
+  var STYLE_KEYS = { fill: "fill", stroke: "stroke", color: "color" };
+
+  /** `fill:#fee,stroke:#c00,color:#300` -> {fill, stroke, color}; anything else is dropped. */
+  function readStyle(text) {
+    var out = {};
+    String(text || "").split(/[,;]/).forEach(function (pair) {
+      var kv = pair.split(":");
+      if (kv.length !== 2) return;
+      var key = STYLE_KEYS[kv[0].trim().toLowerCase()];
+      var value = kv[1].trim();
+      if (key && COLOR_VALUE.test(value)) out[key] = value;
+    });
+    return out;
+  }
+
   // Geometry. Kept here rather than in the renderer so the layout is a complete
   // answer: the drawing code only has to put ink where this says.
   var CHAR_W = 6.9;          // average advance of the 13px UI font
@@ -121,9 +145,16 @@
         label = text.slice(from, k);
         end = k + close.length;
       }
-      return { id: id, label: label, shape: SHAPES[s][2], next: end };
+      return withClass({ id: id, label: label, shape: SHAPES[s][2], next: end }, text);
     }
-    return { id: id, label: null, shape: null, next: j };
+    return withClass({ id: id, label: null, shape: null, next: j }, text);
+  }
+
+  /** Consume a trailing `:::className` after a node reference. */
+  function withClass(ref, text) {
+    var m = /^:::([A-Za-z0-9_-]+)/.exec(text.slice(ref.next));
+    if (m) { ref.cls = m[1]; ref.next += m[0].length; }
+    return ref;
   }
 
   // `-->` and friends. Longest first, again: `-->` before `--`.
@@ -155,17 +186,19 @@
     var nodes = {}, order = [], edges = [];
     var subs = [], stack = [];
     var subSeq = 0;
+    var classDefs = {};
 
     function touch(ref) {
       var node = nodes[ref.id];
       if (!node) {
-        node = nodes[ref.id] = { id: ref.id, label: ref.id, shape: "rect", sub: null };
+        node = nodes[ref.id] = { id: ref.id, label: ref.id, shape: "rect", sub: null, cls: [], style: {} };
         order.push(ref.id);
       }
       // A later declaration with a label wins: mermaid lets you name a node once
       // and refer to it bare everywhere else.
       if (ref.label != null) node.label = ref.label;
       if (ref.shape) node.shape = ref.shape;
+      if (ref.cls && node.cls.indexOf(ref.cls) < 0) node.cls.push(ref.cls);
       if (node.sub == null && stack.length) node.sub = stack[stack.length - 1].id;
       return node;
     }
@@ -191,8 +224,29 @@
         else warnings.push("`end` sem `subgraph` aberto");
         return;
       }
-      // Styling directives carry no structure; the sketch look is croqui's own.
-      if (/^(classDef|class|style|linkStyle|click|direction)\b/i.test(line)) return;
+      // Colour is kept (palette classes, classDef, class, style); the strokes stay
+      // croqui's sketch line. The rest of mermaid's styling carries no structure.
+      var cd = /^classDef\s+([A-Za-z0-9_,-]+)\s+(.+)$/i.exec(line);
+      if (cd) {
+        cd[1].split(",").forEach(function (name) { classDefs[name] = readStyle(cd[2]); });
+        return;
+      }
+      var cl = /^class\s+([A-Za-z0-9_.,#-]+)\s+([A-Za-z0-9_-]+)\s*$/i.exec(line);
+      if (cl) {
+        cl[1].split(",").forEach(function (id) {
+          var n = touch({ id: id, label: null, shape: null });
+          if (n.cls.indexOf(cl[2]) < 0) n.cls.push(cl[2]);
+        });
+        return;
+      }
+      var st = /^style\s+([A-Za-z0-9_.#-]+)\s+(.+)$/i.exec(line);
+      if (st) {
+        var target = touch({ id: st[1], label: null, shape: null });
+        var given = readStyle(st[2]);
+        Object.keys(given).forEach(function (k) { target.style[k] = given[k]; });
+        return;
+      }
+      if (/^(linkStyle|click|direction)\b/i.test(line)) return;
 
       line = normalizeLabels(line);
 
@@ -253,7 +307,18 @@
     var list = order.map(function (id) {
       var n = nodes[id];
       var m = measure(n.label, n.shape);
-      return { id: id, label: n.label, shape: n.shape, sub: n.sub, lines: m.lines, w: m.w, h: m.h };
+      var paint = {}, tone = null;
+      var layers = [classDefs["default"]].concat(n.cls.map(function (c) {
+        if (!classDefs[c] && PALETTE[c] && !tone) tone = c;
+        return classDefs[c];
+      })).concat([n.style]);
+      layers.forEach(function (st) {
+        if (st) Object.keys(st).forEach(function (k) { paint[k] = st[k]; });
+      });
+      var out = { id: id, label: n.label, shape: n.shape, sub: n.sub, lines: m.lines, w: m.w, h: m.h };
+      if (tone) out.tone = tone;
+      if (Object.keys(paint).length) out.paint = paint;
+      return out;
     });
     return { nodes: list, edges: edges, subs: subs };
   }

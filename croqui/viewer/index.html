@@ -23,7 +23,11 @@
   <div class="chips" id="tabs" role="tablist">
     <button class="chip tab" data-tab="map" role="tab" aria-selected="true">mapa</button>
   </div>
-  <input id="search" type="search" placeholder="buscar rota, tabela, service…  ( / )" autocomplete="off">
+  <div id="search-box">
+    <input id="search" type="search" placeholder="buscar rota, tabela, coluna…  (Ctrl+F)" autocomplete="off"
+           title="Enter: próximo · Shift+Enter: anterior · Esc: limpar">
+    <span id="search-count" hidden aria-live="polite"></span>
+  </div>
   <div class="chips" id="method-chips">
     <button class="chip" data-method="GET"    aria-pressed="false" style="--chip-color:var(--get)">GET</button>
     <button class="chip" data-method="POST"   aria-pressed="false" style="--chip-color:var(--post)">POST</button>
@@ -121,7 +125,7 @@
   <b>arrastar no papel</b> seleciona · <b>shift</b> soma · <b>Ctrl+A</b> tudo — arraste um item para mover todos<br>
   <b>duplo-clique</b> no papel cria uma caixa de texto, num desenho escreve dentro dele<br>
   <b>Ctrl+V</b> cola imagem, texto ou um desenho do Excalidraw onde o cursor está<br>
-  <b>Del</b> apaga o selecionado · <b>Ctrl+Z</b> desfaz · <b>Ctrl+S</b> grava
+  <b>Ctrl+F</b> busca (Enter vai ao próximo) · <b>Del</b> apaga o selecionado · <b>Ctrl+Z</b> desfaz · <b>Ctrl+S</b> grava
 </div>
 
 <div id="legend" aria-label="legenda"></div>

@@ -125,6 +125,18 @@ body.hand { --font: var(--font-hand); }
 }
 #search:focus { border-color: var(--post); }
 
+#search-box { position: relative; display: flex; align-items: center; }
+#search-box #search { padding-right: 52px; }
+#search-count {
+  position: absolute;
+  right: 26px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-soft);
+  pointer-events: none;
+}
+#search-count.none { color: var(--delete); }
+
 .chips { display: flex; gap: 5px; flex-wrap: wrap; }
 
 .chip {
@@ -880,7 +892,7 @@ body.reading #inspector,
 body.reading #hint,
 body.reading #legend,
 body.reading #method-chips,
-body.reading #search,
+body.reading #search-box,
 body.reading #expand-all,
 body.reading #toggle-internal,
 body.reading #toggle-hover,
@@ -1171,6 +1183,25 @@ body.space-pan .dg-stage, body.space-pan .dg-stage .dg-node { cursor: grab; }
    generated diagram, and it is what makes the tabs look like one document. */
 .dg-ink { stroke: var(--ink); stroke-width: 1.7; stroke-linecap: round; fill: none; }
 .dg-fill { fill: var(--panel); }
+
+/* Palette classes for UML diagrams: `A:::service`, `class A,B table`. */
+.dg-node.tone-route { --tone: var(--group); }
+.dg-node.tone-service { --tone: var(--service); }
+.dg-node.tone-repo { --tone: var(--repo); }
+.dg-node.tone-table { --tone: var(--table); }
+.dg-node.tone-external { --tone: var(--external); }
+.dg-node.tone-get { --tone: var(--get); }
+.dg-node.tone-post { --tone: var(--post); }
+.dg-node.tone-put { --tone: var(--put); }
+.dg-node.tone-patch { --tone: var(--patch); }
+.dg-node.tone-delete { --tone: var(--delete); }
+.dg-node.tone-ok { --tone: var(--get); }
+.dg-node.tone-warn { --tone: var(--patch); }
+.dg-node.tone-danger { --tone: var(--delete); }
+.dg-node.tone-muted { --tone: var(--ink-faint); }
+.dg-node.tone-accent { --tone: var(--service); }
+.dg-node[class*="tone-"] > .dg-ink { stroke: var(--tone); stroke-width: 2; }
+.dg-node[class*="tone-"] .dg-fill { fill: color-mix(in srgb, var(--tone) 13%, var(--panel)); }
 .dg-label { fill: var(--ink); font-weight: 600; }
 .dg-frame-ink { stroke: var(--ink-faint); stroke-dasharray: 7 5; stroke-width: 1.3; fill: none; }
 .dg-frame-label { fill: var(--ink-faint); font-weight: 700; letter-spacing: 0.04em; }

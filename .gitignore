@@ -13,3 +13,5 @@ shot.png
 #gsd
 .planning
 
+.gradle/
+target/

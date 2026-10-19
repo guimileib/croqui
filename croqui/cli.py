@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .adapters import ADAPTERS, detect_stack
+from .adapters import ADAPTERS, detect_stacks
 from .docs import collect_docs, summarize
 from .model import Graph, load_graph
 from .scaffold import PRD_FILE
@@ -25,6 +25,8 @@ GRAPH_FILE = "graph.json"
 PREV_FILE = "graph.prev.json"
 LAYOUT_FILE = "layout.json"
 BUNDLE_FILE = "croqui.html"
+# Source files whose text may hold schema-qualified table references.
+CODE_SUFFIXES = (".py", ".js", ".mjs", ".cjs", ".ts", ".java", ".kt")
 
 DIM = "\033[2m"
 BOLD = "\033[1m"
@@ -53,22 +55,31 @@ def cmd_scan(args: argparse.Namespace) -> int:
         _say(f"{RED}not a directory: {root}{RESET}")
         return 2
 
-    stack = args.stack or detect_stack(root)
-    if stack is None:
-        _say(f"{RED}could not detect the stack.{RESET} Pass --stack (one of: {', '.join(ADAPTERS)})")
+    stacks = [s.strip() for s in args.stack.split(",") if s.strip()] if args.stack else detect_stacks(root)
+    if not stacks:
+        _say(f"{RED}could not detect the stack.{RESET} Pass --stack (one or more of: {', '.join(ADAPTERS)})")
         return 2
-    if stack not in ADAPTERS:
-        _say(f"{RED}no adapter for '{stack}'.{RESET} Available: {', '.join(ADAPTERS)}")
+    unknown = [s for s in stacks if s not in ADAPTERS]
+    if unknown:
+        _say(f"{RED}no adapter for '{', '.join(unknown)}'.{RESET} Available: {', '.join(ADAPTERS)}")
         return 2
+    stack = ", ".join(stacks)
 
     _say(f"{BOLD}croqui{RESET} scanning {root.name} {DIM}({stack}){RESET}")
 
-    registry = build_registry(root)
+    registry = build_registry(root, code_suffixes=CODE_SUFFIXES)
+    for name in stacks:
+        hook = getattr(ADAPTERS[name], "register_tables", None)
+        if hook:
+            hook(root, registry)
     _say(f"  {GREEN}✓{RESET} {len(registry)} database objects in ground truth {DIM}(DDL + ORM models){RESET}")
 
     graph = Graph({"name": root.name, "stack": stack, "root": str(root), "croqui_version": __version__})
-    scanner = ADAPTERS[stack](root, graph, registry, openapi=args.openapi)
-    scanner.scan()
+    scanners = []
+    for name in stacks:
+        scanner = ADAPTERS[name](root, graph, registry, openapi=args.openapi)
+        scanner.scan()
+        scanners.append(scanner)
 
     if graph.project.get("openapi"):
         _say(f"  {GREEN}✓{RESET} spec: {graph.project['openapi']}")
@@ -94,7 +105,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         if len(unresolved) > 5:
             _say(f"    {DIM}… and {len(unresolved) - 5} more{RESET}")
 
-    for warning in getattr(scanner, "warnings", [])[:5]:
+    for warning in [w for sc in scanners for w in getattr(sc, "warnings", [])][:5]:
         _say(f"  {DIM}· {warning}{RESET}")
 
     out = _out_dir(root)
@@ -318,6 +329,28 @@ def cmd_update(args: argparse.Namespace) -> int:
     return update(check_only=args.check)
 
 
+def cmd_install(args: argparse.Namespace) -> int:
+    from .agents import TARGETS, USAGE, detect_tools, install, uninstall
+
+    base = Path.cwd() if args.project else Path.home()
+    tools = args.tools or detect_tools(Path.home())
+    if not tools:
+        _say(f"{YELLOW}!{RESET} no Claude Code, Codex or Gemini CLI found in your home folder.")
+        _say(f"  pick explicitly: {BOLD}croqui install {' '.join(TARGETS)}{RESET}")
+        return 1
+    if args.uninstall:
+        for path in uninstall(tools, base):
+            _say(f"  {GREEN}✓{RESET} removed {path}")
+        return 0
+    for tool, path in install(tools, base):
+        _say(f"  {GREEN}✓{RESET} {tool}: {path}")
+    _say("")
+    for tool in tools:
+        _say(f"  {BOLD}{tool}{RESET}  {USAGE[tool]}")
+    _say(f"\n{DIM}restart the tool (or open a new session) to load the command.{RESET}")
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     root = Path(args.path).resolve()
     graph_path = root / OUT_DIR / GRAPH_FILE
@@ -342,7 +375,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_scan = subs.add_parser("scan", help="analyse the source and write .croqui/graph.json")
     p_scan.add_argument("path", nargs="?", default=".")
-    p_scan.add_argument("--stack", help=f"force an adapter ({', '.join(ADAPTERS)})")
+    p_scan.add_argument("--stack", help=f"force one or more adapters, comma-separated ({', '.join(ADAPTERS)})")
     p_scan.add_argument(
         "--openapi",
         help="path or http(s) URL of the OpenAPI JSON (default: search the usual locations)",
@@ -422,10 +455,31 @@ def build_parser() -> argparse.ArgumentParser:
     p_stats.add_argument("path", nargs="?", default=".")
     p_stats.set_defaults(func=cmd_stats)
 
+    p_install = subs.add_parser(
+        "install", help="add the /croqui command to Claude Code, Codex and Gemini CLI"
+    )
+    p_install.add_argument("tools", nargs="*", choices=["claude", "codex", "gemini"],
+                           help="which tools (default: every one found in your home folder)")
+    p_install.add_argument("--project", action="store_true",
+                           help="install into this repository instead of your home folder")
+    p_install.add_argument("--uninstall", action="store_true", help="remove the command files")
+    p_install.set_defaults(func=cmd_install)
+
     return parser
 
 
+def _utf8_streams() -> None:
+    """Write UTF-8 even where the console or pipe defaults to a legacy code page (Windows)."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure") and (stream.encoding or "").lower().replace("-", "") != "utf8":
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _utf8_streams()
     args = build_parser().parse_args(argv)
     try:
         return args.func(args)

@@ -6,9 +6,9 @@ Mapas interativos, em traço de rascunho, de uma API **e do banco que ela toca**
 
 ```
 endpoints            services            repositories        database
-┌──────────────┐     ┌────────────┐      ┌───────────────┐   ┌──────────────┐
-│ ▸ v2 — Orders│────▶│OrderService│─────▶│OrderRepository│──▶│ crm.tb_orders│
-│ 16 endpoints │     └────────────┘      └───────────────┘   │ tb_order_item│
+┌──────────────┐     ┌───────────┐       ┌──────────────┐    ┌──────────────┐
+│ ▸ v2 — Leads │────▶│LeadService│──────▶│LeadRepository│───▶│ crm.tb_leads │
+│ 16 endpoints │     └───────────┘       └──────────────┘    │ tb_lead_note │
 │ GET 8 POS 5  │                                             └──────────────┘
 └──────────────┘
 ```
@@ -17,19 +17,18 @@ Não é um retrato da sua árvore de pastas — é o mapa de qual endpoint chega
 
 ## Por quê
 
-Documentação de API gerada para na fronteira do HTTP. O `openapi.json` diz que `POST /orders` recebe um `OrderDTO`; ele não diz que essa chamada grava em `tb_orders`, `tb_order_item` e `tb_order_audit`. Essa segunda metade é justamente a que você precisa ao revisar uma migration, integrar alguém no time ou explicar um bug.
+Documentação de API gerada para na fronteira do HTTP. O `openapi.json` diz que `POST /leads` recebe um `LeadDTO`; ele não diz que essa chamada grava em `tb_leads`, `tb_lead_note` e `tb_lead_audit`. Essa segunda metade é justamente a que você precisa ao revisar uma migration, integrar alguém no time ou explicar um bug.
 
 O Excalidraw desenha isso lindamente, à mão, uma vez — e depois envelhece. O croqui regenera do código e continua parecendo feito à mão.
 
 ## Instalação
 
-Ainda não está no PyPI (o nome não é de ninguém — veja *[Publicando](RELEASING.md)*),
-então instale a partir de um checkout:
-
 ```sh
-git clone https://github.com/guimileib/croqui
-pipx install ./croqui          # a CLI no seu PATH, em uma venv própria
+pipx install croqui            # a CLI no seu PATH, em uma venv própria (ou: pip install croqui)
+croqui install                 # opcional: o comando /croqui no Claude Code, Codex e Gemini CLI
 ```
+
+A partir de um checkout: `git clone https://github.com/guimileib/croqui && pipx install ./croqui`.
 
 O `pipx` é a ferramenta certa aqui mesmo o croqui tendo forma de biblioteca: é um
 comando que você roda *contra* outros projetos, então ele não pertence à virtualenv de
@@ -147,9 +146,10 @@ Cada traço da página — o mapa gerado e as formas que você desenha em cima �
 | **Ctrl+V** | cola no mapa, onde o cursor está: uma imagem, um texto, ou uma seleção do Excalidraw — com formas e setas |
 | **abas** | `mapa` · `PRD` · `UML` — veja *[Um arquivo, três abas](#um-arquivo-três-abas)*. **Esc** ou **m** volta ao mapa |
 | **isolar esta cadeia** | mostra só o caminho de um endpoint até o banco |
-| **busca / chips de verbo** | escurece tudo que não casa |
+| **Ctrl+F** ou **/** | busca rotas, tabelas, **colunas**, services, handlers e docs. Um contador mostra os resultados; **Enter** / **Shift+Enter** leva ao próximo / anterior e abre o painel, expandindo o grupo se preciso; **Esc** limpa. Ctrl+F de novo (com a caixa já focada) é o localizar do próprio navegador |
+| **chips de verbo** | escurece tudo que não casa |
 | **roda / shift+roda** | zoom / pan |
-| **URL** | `…/croqui.html#node=route:GET:/v2/crm/orders` abre direto num endpoint |
+| **URL** | `…/croqui.html#node=route:GET:/v2/crm/leads` abre direto num endpoint |
 
 Claro e escuro seguem o sistema. `✍` troca para uma fonte de escrita à mão onde o sistema tiver uma.
 
@@ -165,8 +165,8 @@ produz um HTML só, que carrega os três:
   01-visao.md             ->  aba PRD
   02-fora-de-escopo.md
 .croqui/uml/
-  fluxo-do-pedido.mmd     ->  aba UML
-  sequencia-checkout.mmd
+  fluxo-do-lead.mmd       ->  aba UML
+  qualificacao-leads.mmd
 ```
 
 As duas pastas são procuradas primeiro dentro do `.croqui/` e depois na raiz do projeto
@@ -274,9 +274,16 @@ O que ele desenha hoje:
 | `sequenceDiagram` | `participant` / `actor`, apelidos com `as`, `->>` `-->>` `->` `-->` `--x`, rótulos de mensagem, `Note over/left of/right of` |
 | qualquer outro | o tipo do diagrama é nomeado e **sua fonte aparece na íntegra** — nunca um painel em branco |
 
-`classDef`, `style`, `linkStyle` e `click` são lidos e ignorados: o traço de rascunho é
-do croqui, e um diagrama que honra metade de uma diretiva de cor é pior que um que
-claramente não honra nenhuma. `loop` / `alt` / `opt` / `par` num diagrama de sequência
+**Cor.** O traço continua o lápis do croqui, mas um nó pode ganhar cor:
+
+- a paleta do próprio croqui, sem `classDef`: `A:::service`, ou `class A,B table`.
+  Nomes: `route` `service` `repo` `table` `external` `get` `post` `put` `patch`
+  `delete` `ok` `warn` `danger` `muted` `accent`. Acompanham o tema claro/escuro.
+- mermaid comum: `classDef hot fill:#ffe3e3,stroke:#c92a2a,color:#5c0000` com
+  `A:::hot` / `class A hot`, e `style A stroke:#000`. Só `fill`, `stroke` e `color`
+  com um valor de cor são aceitos; o resto é descartado.
+
+`linkStyle` e `click` são lidos e ignorados. `loop` / `alt` / `opt` / `par` num diagrama de sequência
 ainda não viram faixas desenhadas; o croqui avisa acima do diagrama e desenha todas as
 mensagens assim mesmo.
 
@@ -296,12 +303,12 @@ fazem isso, e são os mesmos fatos duas vezes:
 ```sh
 croqui context                       # markdown, para colar em qualquer LLM
 croqui context --json                # o mesmo, estruturado
-croqui context --node /v1/orders     # um endpoint ou tabela, inteiro
+croqui context --node /v1/leads     # um endpoint ou tabela, inteiro
 croqui context --full                # inclui a doc de cada endpoint e o corpo dos documentos
 ```
 
 O digest nomeia o projeto, lista cada endpoint com a cadeia atrás dele
-(`GET /v1/orders → OrderService → OrderRepository -[grava: insert]-> tb_orders`), as
+(`GET /v1/leads → LeadService → LeadRepository -[grava: insert]-> tb_leads`), as
 tabelas com suas colunas, os serviços e repositórios, e um índice dos documentos PRD e
 UML. Ele é intencionalmente incompleto — descrições são cortadas, cadeias têm teto —
 porque um contexto que não cabe é um contexto que ninguém usa. Uma API pequena sai com
@@ -323,6 +330,27 @@ escrever**:
 Assim o ciclo fecha: o modelo lê o mapa, escreve um PRD ou um diagrama nas pastas que o
 visualizador já renderiza, e a próxima pessoa abre o `croqui serve` e vê aquilo numa aba.
 Nada disso é específico do Claude — são arquivos numa pasta.
+
+### `/croqui` no Claude Code, Codex e Gemini CLI
+
+```sh
+croqui install            # todas as ferramentas encontradas na sua home
+croqui install claude     # ou escolha: claude codex gemini
+croqui install --project  # neste repositório, para commitar para o time
+```
+
+| ferramenta | digite |
+|---|---|
+| Claude Code | `/croqui fluxo de qualificação de leads com as tabelas que ele grava` |
+| Codex | `$croqui …` (ou `/prompts:croqui …`) |
+| Gemini CLI | `/croqui …` |
+
+O comando desenha o que você pedir, deste código ou de uma ideia, como um diagrama
+Mermaid na aba UML, na paleta do croqui. Ele foi feito para custar pouco: o modelo lê
+`croqui context --node …` (poucos KB de análise estática, nenhum token gasto procurando
+coisas) em vez de vasculhar o código, abre no máximo três arquivos para o que o mapa não
+responde, e nunca chama `enrich`/`prd` sem você pedir. Depois `croqui build .` gera a
+página. `croqui install --uninstall` remove os arquivos.
 
 ### MCP
 
@@ -453,7 +481,7 @@ Relações são guardadas como ids de nó no `layout.json`, então sobrevivem a 
 
 Uma relação une dois *nós*. Uma seta é um desenho, e as pontas dela podem se ligar a qualquer coisa que tenha caixa: um nó, um retângulo que você desenhou em volta de uma cadeia, uma caixa de texto, um print colado. A regra cabe numa frase — **uma ponta que descansa dentro de uma caixa fica ligada a ela** — e vale sempre que você solta: depois de desenhar a seta, depois de arrastar uma ponta, depois de mover a seta inteira. A ponta para um pouco antes da borda, apontando para a outra ponta (ou para o meio da outra caixa, quando as duas estão ligadas), então uma seta entre duas caixas continua sendo uma seta entre duas caixas por mais que você as mova. Quando uma caixa está dentro de outra — um rótulo sobre um nó, um nó dentro de uma moldura — a menor ganha.
 
-O inspetor diz a que a seta está ligada (*ligada: retângulo → OrderService*); apertar ali solta as duas pontas. Apagar um desenho solta as pontas que estavam ligadas a ele; a seta fica onde estava. Uma seta do Excalidraw que estava presa a uma caixa chega presa à cópia dessa caixa.
+O inspetor diz a que a seta está ligada (*ligada: retângulo → LeadService*); apertar ali solta as duas pontas. Apagar um desenho solta as pontas que estavam ligadas a ele; a seta fica onde estava. Uma seta do Excalidraw que estava presa a uma caixa chega presa à cópia dessa caixa.
 
 ### Desenhos que pertencem a um nó
 
@@ -466,23 +494,23 @@ Desenhos e relações moram no `layout.json` junto com as suas posições, entã
 ```json
 {
   "croqui_layout": 2,
-  "positions": { "svc:OrderService": { "x": 426, "y": 100 } },
+  "positions": { "svc:LeadService": { "x": 426, "y": 100 } },
   "shapes": [
     { "id": "sh-…", "type": "cloud", "x": 640, "y": -120, "w": 190, "h": 120,
       "text": "fila nova, Q3", "color": "orange", "fill": true, "dash": false, "size": 13,
-      "anchor": { "node": "svc:OrderService", "dx": 214, "dy": -220 } },
+      "anchor": { "node": "svc:LeadService", "dx": 214, "dy": -220 } },
     { "id": "sh-…", "type": "image", "x": 470, "y": -300, "w": 520, "h": 260,
       "src": "a1b2c3d4e5f60718.png", "front": true },
     { "id": "sh-…", "type": "arrow", "x": 835, "y": -60, "w": -204, "h": 118,
       "color": "ink", "dash": false, "heads": "end",
-      "from": { "shape": "sh-…" }, "to": { "node": "svc:OrderService" } }
+      "from": { "shape": "sh-…" }, "to": { "node": "svc:LeadService" } }
   ],
   "links": [
-    { "id": "ln-…", "from": "svc:OrderService", "to": "tbl:crm.tb_orders",
+    { "id": "ln-…", "from": "svc:LeadService", "to": "tbl:crm.tb_leads",
       "label": "compensação", "color": "red", "heads": "both", "dash": true }
   ],
   "view": {
-    "expanded": ["orders"], "focus": null,
+    "expanded": ["leads"], "focus": null,
     "camera": { "x": -120, "y": 44, "k": 0.82 },
     "filters": { "query": "", "methods": ["GET"], "internal": false, "hover": false }
   }
@@ -591,7 +619,7 @@ entrega a um agente, e escreve o documento de volta na pasta de PRD que a aba j�
 ```sh
 croqui prd                                   # preenche .croqui/prd/01-visao-geral.md
 croqui prd --dry-run                         # qual modelo, qual arquivo, não chama nada
-croqui prd --about "foco no checkout"        # direciona o que ele enfatiza
+croqui prd --about "foco em leads"           # direciona o que ele enfatiza
 croqui prd --name 02-billing.md              # um segundo documento, ao lado do primeiro
 ```
 
@@ -613,12 +641,21 @@ arquitetura e não a sua intenção, e o cabeçalho que ele escreve diz isso tam
 
 ## Stacks
 
-| Stack | Situação |
-|---|---|
-| Python / FastAPI + SQLAlchemy | suportado |
-| qualquer outra | só `croqui enrich`, até um adaptador chegar |
+| Stack | Rotas | Banco |
+|---|---|---|
+| Python / FastAPI | `APIRouter`, DI com `Depends`, prefixos | models SQLAlchemy, SQL inline |
+| Python / Flask | `@app.route`, Blueprints (aninhados), `MethodView`, `add_url_rule`, flask-restful | Flask-SQLAlchemy (`db.Model`), `session`, SQL inline |
+| Python / Django | `urls.py` + `include`, views de função e de classe, viewsets e routers DRF, `@action` | models do Django ORM (`db_table` ou `app_model`), cadeias `objects`, `.raw`, cursores |
+| Node / Express | verbos em `app`/`router`, `router.route()`, `use()` entre arquivos | Prisma, TypeORM, Sequelize, Knex, SQL puro |
+| Node / NestJS | `@Controller` + `@Get`…, prefixo global, versionamento, `@ApiOperation` | TypeORM `@InjectRepository`, Prisma, repositórios próprios |
+| Java e Kotlin / Spring Boot | `@RestController`, `@*Mapping`, context-path, constantes | JPA `@Entity`/`@Table`, repositórios Spring Data (queries derivadas, `@Query`), `JdbcTemplate`, MyBatis |
 
-Adaptadores moram em `croqui/adapters/`, um módulo por stack, cada um transformando código-fonte em nós e arestas do grafo. `detect_stack()` escolhe um; `--stack` sobrepõe.
+Toda stack resolve rota → service → repositório → tabela, além de rotas que tocam
+tabelas direto, e só desenha tabelas que o próprio repositório define (DDL, migrations
+ou models do ORM). Um monorepo com várias stacks vira um mapa só: o `scan` roda todo
+adaptador que detectar. `--stack python/django,node/nestjs` sobrepõe a detecção.
+
+Adaptadores moram em `croqui/adapters/`, um módulo por stack.
 
 ## Limites conhecidos
 

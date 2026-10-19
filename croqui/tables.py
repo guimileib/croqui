@@ -6,6 +6,7 @@ Tables not found here are dropped or marked ``verified: false``.
 from __future__ import annotations
 
 import ast
+import os
 import re
 from pathlib import Path
 
@@ -39,7 +40,7 @@ SCHEMA_KW_RE = re.compile(r"""["']schema["']\s*:\s*["'](\w+)["']""")
 QUALIFIED_RE = re.compile(r"\b([a-z_][a-z_0-9]*)\.((?:tb|mv|v|fn)_[a-z_0-9]+)\b")
 
 DDL_GLOBS = ("**/*.sql",)
-SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache", ".croqui", "tmp"}
+SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache", ".croqui", "tmp", "dist", "build", "target", ".gradle", ".next"}
 
 KIND_BY_DDL = {"TABLE": "table", "VIEW": "view", "MATERIALIZED VIEW": "matview"}
 
@@ -100,18 +101,14 @@ class TableRegistry:
 
 
 def _iter_files(root: Path, suffixes: tuple[str, ...]) -> list[Path]:
+    # SKIP_DIRS names directories *inside* the project; pruning while walking keeps
+    # an ancestor such as ~/tmp from hiding the whole tree, and never enters
+    # node_modules at all.
     out: list[Path] = []
-    for path in root.rglob("*"):
-        if path.suffix not in suffixes or not path.is_file():
-            continue
-        # Relative to the root, never absolute: SKIP_DIRS names directories *inside*
-        # a project, and matching it against the whole path made every ancestor
-        # count too. A checkout under ~/tmp or any path with a `venv` component in
-        # it lost its entire database column, silently and with no way to tell.
-        if any(part in SKIP_DIRS for part in path.relative_to(root).parts):
-            continue
-        out.append(path)
-    return out
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS]
+        out.extend(Path(dirpath, f) for f in filenames if os.path.splitext(f)[1] in suffixes)
+    return sorted(out)
 
 
 def _paren_block(text: str, start: int) -> str | None:
@@ -265,7 +262,7 @@ def build_registry(root: Path, *, code_suffixes: tuple[str, ...] = (".py",)) -> 
 
     # 1. DDL is the strongest signal: it carries schema and object kind.
     for sql_file in _iter_files(root, (".sql",)):
-        rel = str(sql_file.relative_to(root))
+        rel = sql_file.relative_to(root).as_posix()
         text = sql_file.read_text(encoding="utf-8", errors="replace")
         for match in DDL_RE.finditer(text):
             kind = KIND_BY_DDL.get(" ".join(match.group(1).upper().split()), "table")
@@ -276,7 +273,7 @@ def build_registry(root: Path, *, code_suffixes: tuple[str, ...] = (".py",)) -> 
 
     # 2. ORM models. The schema usually sits in __table_args__ a few lines away.
     for code_file in _iter_files(root, code_suffixes):
-        rel = str(code_file.relative_to(root))
+        rel = code_file.relative_to(root).as_posix()
         text = code_file.read_text(encoding="utf-8", errors="replace")
         if "__tablename__" not in text:
             continue
@@ -300,7 +297,7 @@ def build_registry(root: Path, *, code_suffixes: tuple[str, ...] = (".py",)) -> 
     #    schema-qualified tb_/mv_ token is specific enough to trust as a
     #    reference, and it back-fills the schema for models that omitted it.
     for code_file in _iter_files(root, code_suffixes):
-        rel = str(code_file.relative_to(root))
+        rel = code_file.relative_to(root).as_posix()
         text = code_file.read_text(encoding="utf-8", errors="replace")
         for schema, name in QUALIFIED_RE.findall(text):
             if name.startswith("fn_"):

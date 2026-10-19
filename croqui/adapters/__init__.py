@@ -4,27 +4,51 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ._common import iter_files
+from .django_py import DjangoScanner
+from .express_js import ExpressScanner
 from .fastapi_py import FastApiScanner
+from .flask_py import FlaskScanner
+from .nestjs_ts import NestScanner
+from .spring_java import SpringScanner
 
-ADAPTERS = {"python/fastapi": FastApiScanner}
+ADAPTERS = {
+    "python/fastapi": FastApiScanner,
+    "python/flask": FlaskScanner,
+    "python/django": DjangoScanner,
+    "node/express": ExpressScanner,
+    "node/nestjs": NestScanner,
+    "java/spring": SpringScanner,
+}
 
 
-def detect_stack(root: Path) -> str | None:
-    """Best-effort stack detection, cheapest signal first."""
+def _is_fastapi(root: Path) -> bool:
     for candidate in ("requirements.txt", "pyproject.toml", "requirements-worker.txt"):
         path = root / candidate
         if path.is_file():
             text = path.read_text(encoding="utf-8", errors="replace").lower()
             if "fastapi" in text:
-                return "python/fastapi"
-    if list(root.glob("**/main.py")) and list(root.rglob("*.py")):
-        for path in root.rglob("*.py"):
-            if "__pycache__" in path.parts:
-                continue
-            head = path.read_text(encoding="utf-8", errors="replace")[:2000]
-            if "APIRouter" in head or "from fastapi" in head:
-                return "python/fastapi"
-    return None
+                return True
+    for path in iter_files(root, (".py",)):
+        head = path.read_text(encoding="utf-8", errors="replace")[:2000]
+        if "APIRouter" in head or "from fastapi" in head:
+            return True
+    return False
 
 
-__all__ = ["ADAPTERS", "FastApiScanner", "detect_stack"]
+def detect_stacks(root: Path) -> list[str]:
+    """Every stack this project uses, in ``ADAPTERS`` order (a monorepo can have several)."""
+    found = ["python/fastapi"] if _is_fastapi(root) else []
+    for stack, adapter in ADAPTERS.items():
+        if stack != "python/fastapi" and adapter.detect(root):
+            found.append(stack)
+    return found
+
+
+def detect_stack(root: Path) -> str | None:
+    """The first detected stack, or None."""
+    stacks = detect_stacks(root)
+    return stacks[0] if stacks else None
+
+
+__all__ = ["ADAPTERS", "detect_stack", "detect_stacks"]

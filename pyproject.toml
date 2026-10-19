@@ -13,7 +13,8 @@ license-files = ["LICENSE"]
 authors = [{ name = "Guilherme Mileib" }]
 keywords = [
   "api", "documentation", "diagram", "openapi", "database", "visualization",
-  "mermaid", "prd", "uml", "mcp", "llm", "claude", "fastapi",
+  "mermaid", "prd", "uml", "mcp", "llm", "claude", "fastapi", "flask", "django",
+  "express", "nestjs", "spring-boot",
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
