@@ -24,7 +24,7 @@ class Lead(db.Model):
     status = db.Column(db.String(20))
 
 
-class LeadItem(db.Model):
+class LeadNote(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     lead_id = db.Column(db.Integer, db.ForeignKey("leads.id"))
     sku = db.Column(db.String(40))

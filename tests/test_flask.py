@@ -40,7 +40,7 @@ class FlaskTableTests(unittest.TestCase):
         _, registry = scan(APP)
         names = {r["name"] for r in registry.all()}
         # explicit __tablename__ plus Flask-SQLAlchemy defaults (no __tablename__ declared)
-        self.assertTrue({"leads", "user", "user_profile", "lead_item"} <= names)
+        self.assertTrue({"leads", "user", "user_profile", "lead_note"} <= names)
 
     def test_columns_include_mixin_and_fk(self) -> None:
         _, registry = scan(APP)
@@ -65,7 +65,7 @@ class FlaskRouteTests(unittest.TestCase):
             "route:GET:/leads/",
             "route:POST:/leads/",
             "route:DELETE:/leads/{lead_id}",
-            "route:GET:/leads/{lead_id}/items",
+            "route:GET:/leads/{lead_id}/notes",
         ):
             self.assertIn(node_id, self.graph.nodes)
         node = self.graph.nodes["route:GET:/leads/"]
@@ -103,7 +103,7 @@ class FlaskRouteTests(unittest.TestCase):
         self.edge("service:LeadService", "external:HTTP / Webhook", "send")
 
     def test_direct_orm_route_to_table(self) -> None:
-        edge = self.edge("route:GET:/leads/{lead_id}/items", "table:lead_item", "read")
+        edge = self.edge("route:GET:/leads/{lead_id}/notes", "table:lead_note", "read")
         self.assertEqual(edge["ops"], ["SELECT"])
 
     def test_methodview_ops_per_verb(self) -> None:
@@ -117,7 +117,7 @@ class FlaskRouteTests(unittest.TestCase):
         self.edge("route:GET:/reports/revenue", "table:leads", "read")
         self.edge("route:GET:/reports/revenue", "table:user", "read")
         # module-level SQL constant
-        self.edge("route:GET:/reports/top-skus", "table:lead_item", "read")
+        self.edge("route:GET:/reports/top-skus", "table:lead_note", "read")
 
     def test_dynamic_sql_is_flagged_not_guessed(self) -> None:
         node = self.graph.nodes["route:GET:/reports/adhoc/{name}"]

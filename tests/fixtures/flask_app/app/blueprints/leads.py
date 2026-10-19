@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 
-from ..models import LeadItem
+from ..models import LeadNote
 from ..repositories import LeadRepository
 from ..services import LeadService
 
@@ -26,6 +26,6 @@ def cancel_lead(lead_id):
     return "", 204
 
 
-@bp.get("/<int:lead_id>/items")
-def lead_items(lead_id):
-    return jsonify(LeadItem.query.filter_by(lead_id=lead_id).all())
+@bp.get("/<int:lead_id>/notes")
+def lead_notes(lead_id):
+    return jsonify(LeadNote.query.filter_by(lead_id=lead_id).all())

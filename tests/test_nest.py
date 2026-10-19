@@ -40,7 +40,7 @@ class NestTests(unittest.TestCase):
                 "route:DELETE:/api/users/{id}",
                 "route:GET:/api/leads",
                 "route:POST:/api/leads",
-                "route:GET:/api/leads/{id}/items",
+                "route:GET:/api/leads/{id}/notes",
             },
         )
         self.assertFalse([n for n in self.graph.nodes if "legacy" in n])  # commented out

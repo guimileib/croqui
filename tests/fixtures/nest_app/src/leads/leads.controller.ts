@@ -9,9 +9,9 @@ export class LeadsController {
     private readonly auditService: AuditService,
   ) {}
 
-  @Get(':id/items')
-  items(@Param('id') id: string) {
-    return this.leadsService.items(id);
+  @Get(':id/notes')
+  notes(@Param('id') id: string) {
+    return this.leadsService.notes(id);
   }
 
   @Post()

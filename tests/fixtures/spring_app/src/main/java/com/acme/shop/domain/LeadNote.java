@@ -6,7 +6,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 
 @Entity
-public class LeadItem {
+public class LeadNote {
     @Id
     private Long id;
 

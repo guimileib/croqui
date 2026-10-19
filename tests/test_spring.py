@@ -125,7 +125,7 @@ class JavaFixtureTest(unittest.TestCase):
     def test_default_snake_case_entity_registered(self) -> None:
         registry = build_registry(self.root, code_suffixes=(".java",))
         SpringScanner.register_tables(self.root, registry)
-        rec = registry.resolve("lead_item")
+        rec = registry.resolve("lead_note")
         self.assertIsNotNone(rec)
         cols = {c["name"]: c for c in rec["columns"]}
         self.assertEqual(list(cols), ["id", "owner_id", "unit_price", "product_name"])
@@ -211,7 +211,7 @@ class LexerTest(unittest.TestCase):
         self.assertIn("val t = 1", skel)
 
     def test_snake(self) -> None:
-        self.assertEqual(_snake("LeadItem"), "lead_item")
+        self.assertEqual(_snake("LeadNote"), "lead_note")
         self.assertEqual(_snake("userAccountId"), "user_account_id")
         self.assertEqual(_snake("email"), "email")
 

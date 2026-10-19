@@ -5,7 +5,7 @@ import { LeadsRepository } from './leads.repository';
 export class LeadsService {
   constructor(private readonly leadsRepository: LeadsRepository) {}
 
-  items(id: string) {
+  notes(id: string) {
     return this.leadsRepository.findById(Number(id));
   }
 
