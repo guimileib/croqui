@@ -143,7 +143,7 @@ class FastApiScanner:
         for path in sorted(self.root.rglob("*.py")):
             if any(part in SKIP_DIRS for part in path.relative_to(self.root).parts):
                 continue
-            rel = str(path.relative_to(self.root))
+            rel = path.relative_to(self.root).as_posix()
             try:
                 tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"), filename=rel)
             except SyntaxError as exc:

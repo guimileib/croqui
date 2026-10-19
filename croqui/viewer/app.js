@@ -129,6 +129,8 @@
     expanded: {},
     focus: null,
     query: "",
+    // Which search hit Enter last jumped to; -1 until the first Enter.
+    searchAt: -1,
     methods: new Set(),
     showInternal: false,
     selected: null,
@@ -885,17 +887,84 @@
     return state.vnodes.filter(function (n) { return chain.has(n.id); });
   }
 
-  function matchesQuery(node) {
-    if (!state.query) return true;
-    var q = state.query.toLowerCase();
-    var parts = [node.label, node.group, node.meta.summary, node.meta.path, node.meta.source, node.meta.schema];
+  /** Everything a person might type to find this node: names, paths, docs, columns. */
+  function searchText(node) {
+    var m = node.meta || {};
+    var parts = [node.label, node.group, m.summary, m.path, m.source, m.schema, m.handler, m.description];
+    (m.columns || []).forEach(function (c) { parts.push(c && c.name); });
+    (m.methods || []).forEach(function (name) { parts.push(name); });
     if (node.kind === "group") {
-      (node.meta.routes || []).forEach(function (id) {
+      (m.routes || []).forEach(function (id) {
         var r = state.rawIndex[id];
-        if (r) parts.push(r.meta.path, r.meta.summary);
+        if (r) parts.push(r.label, r.meta.summary, r.meta.handler);
       });
     }
-    return parts.filter(Boolean).join(" ").toLowerCase().indexOf(q) >= 0;
+    return parts.filter(Boolean).join(" ").toLowerCase();
+  }
+
+  function matchesQuery(node) {
+    if (!state.query) return true;
+    return searchText(node).indexOf(state.query.toLowerCase()) >= 0;
+  }
+
+  /**
+   * Every node that matches the search, in reading order (column, then top to
+   * bottom). Routes hidden inside a collapsed group count on their own, so the
+   * counter says how many endpoints match, not how many boxes light up.
+   */
+  function searchHits() {
+    if (!state.query) return [];
+    var q = state.query.toLowerCase();
+    var hits = (state.graph.nodes || []).filter(function (n) {
+      if (n.kind === "route" && !routePasses(n)) return false;
+      return searchText(n).indexOf(q) >= 0;
+    });
+    var order = { route: 0, service: 1, repo: 2, table: 3, external: 4 };
+    hits.sort(function (a, b) {
+      var ba = state.boxes[a.id], bb = state.boxes[b.id];
+      return (order[a.kind] - order[b.kind]) || ((ba ? ba.y : 0) - (bb ? bb.y : 0)) ||
+        String(a.label).localeCompare(String(b.label));
+    });
+    return hits;
+  }
+
+  /** Update the "3/12" counter beside the search box. */
+  function paintSearchCount() {
+    if (!el.searchCount) return;
+    var total = state.query ? searchHits().length : 0;
+    el.searchCount.hidden = !state.query;
+    el.searchCount.classList.toggle("none", !!state.query && !total);
+    el.searchCount.textContent = !state.query ? "" :
+      !total ? "nada" : (state.searchAt >= 0 ? (state.searchAt % total) + 1 + "/" : "") + total;
+  }
+
+  /** Enter / Shift+Enter in the search box: pan to the next or previous hit and open it. */
+  function stepSearch(dir) {
+    var hits = searchHits();
+    if (!hits.length) { paintSearchCount(); return; }
+    state.searchAt = state.searchAt < 0 ? (dir > 0 ? 0 : hits.length - 1)
+      : (state.searchAt + dir + hits.length) % hits.length;
+    var node = hits[state.searchAt];
+    if (node.kind === "route" && !state.expanded[groupKey(node)]) {
+      state.expanded[groupKey(node)] = true;
+      render();
+    }
+    centreOn(node.id);
+    openPanel(node.id);
+    paintSearchCount();
+  }
+
+  /** Pan (never zoom out past readability) so a node's box sits mid-screen. */
+  function centreOn(id) {
+    var b = state.boxes[id];
+    if (!b) return;
+    var k = Math.max(state.view.k, 0.8);
+    var vw = el.canvas.clientWidth - (el.panel.classList.contains("open") ? 380 : 0);
+    var vh = el.canvas.clientHeight;
+    state.view.k = k;
+    state.view.x = vw / 2 - (b.x + b.w / 2) * k;
+    state.view.y = vh / 2 - (b.y + b.h / 2) * k;
+    applyView();
   }
 
   /* ------------------------------------------------------------------ layout */
@@ -2731,6 +2800,7 @@
   /** Push the restored view back onto the toolbar, which is otherwise hardcoded. */
   function syncChrome() {
     if (el.search) el.search.value = state.query;
+    paintSearchCount();
     if (el.methodChips) {
       Array.prototype.forEach.call(el.methodChips.querySelectorAll("[data-method]"), function (chip) {
         press(chip, state.methods.has(chip.getAttribute("data-method")));
@@ -4121,8 +4191,23 @@
 
     on(el.search, "input", function () {
       state.query = el.search.value.trim();
+      state.searchAt = -1;
       applyEmphasis();
+      paintSearchCount();
       rememberView();
+    });
+    on(el.search, "keydown", function (ev) {
+      if (ev.key === "Enter") { ev.preventDefault(); stepSearch(ev.shiftKey ? -1 : 1); }
+      else if (ev.key === "Escape" && el.search.value) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        el.search.value = "";
+        state.query = "";
+        state.searchAt = -1;
+        applyEmphasis();
+        paintSearchCount();
+        rememberView();
+      }
     });
 
     on(el.methodChips, "click", function (ev) {
@@ -4303,6 +4388,15 @@
         if ((key === "z" && ev.shiftKey) || key === "y") { ev.preventDefault(); redo(); return; }
       }
       if (mod && ev.key.toLowerCase() === "s") { ev.preventDefault(); saveLayout(); return; }
+      // Ctrl+F searches the map. Pressed again while the box has focus, or on a
+      // reading tab (plain text), it is the browser's own find, untouched.
+      if (mod && !ev.shiftKey && ev.key.toLowerCase() === "f" && state.tab === "map" &&
+          document.activeElement !== el.search) {
+        ev.preventDefault();
+        el.search.focus();
+        el.search.select();
+        return;
+      }
 
       if (typing) {
         if (ev.key === "Escape") ev.target.blur();
@@ -5045,14 +5139,25 @@
     });
 
     model.nodes.forEach(function (n) {
-      var g = svgEl("g", { class: "dg-node", "data-id": n.id, transform: "translate(" + n.x + "," + n.y + ")" });
+      var g = svgEl("g", {
+        class: "dg-node" + (n.tone ? " tone-" + n.tone : ""), "data-id": n.id,
+        transform: "translate(" + n.x + "," + n.y + ")",
+      });
       var fill = shapeFillEl(n.shape, n.w, n.h);
       fill.setAttribute("class", "dg-fill");
       g.appendChild(fill);
-      g.appendChild(svgEl("path", {
+      var ink = svgEl("path", {
         class: "dg-ink", d: shapeOutline(n.shape, n.w, n.h, hashCode(n.id), 1.5), fill: "none",
-      }));
+      });
+      g.appendChild(ink);
       boxLabel(g, n.lines, n.w / 2, n.h / 2, 13);
+      // classDef / style colours; the parser only lets colour values through.
+      var paint = n.paint || {};
+      if (paint.fill) fill.style.fill = paint.fill;
+      if (paint.stroke) ink.style.stroke = paint.stroke;
+      if (paint.color) {
+        Array.prototype.forEach.call(g.querySelectorAll("text"), function (txt) { txt.style.fill = paint.color; });
+      }
       boxes.appendChild(g);
       flow.nodes[n.id] = g;
     });
@@ -5216,6 +5321,7 @@
     el.panelBody = document.getElementById("panel-body");
     el.panelClose = document.querySelector("#panel .close");
     el.search = document.getElementById("search");
+    el.searchCount = document.getElementById("search-count");
     el.methodChips = document.getElementById("method-chips");
     el.toggleInternal = document.getElementById("toggle-internal");
     el.toggleHover = document.getElementById("toggle-hover");

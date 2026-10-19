@@ -1,0 +1,8 @@
+model Order {
+  id       Int      @id @default(autoincrement())
+  total    Decimal
+  userId   Int      @map("user_id")
+  placedAt DateTime @default(now())
+
+  @@map("orders")
+}

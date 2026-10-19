@@ -1,0 +1,6 @@
+server:
+  servlet:
+    context-path: /api   # global prefix
+spring:
+  application:
+    name: shop
