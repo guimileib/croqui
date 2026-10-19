@@ -1169,7 +1169,7 @@ def _jpql_refs(query: str, entity_tables: dict[str, str]) -> list[tuple[str, str
         op = _OP_BY_KEYWORD[" ".join(kw.upper().split())]
         name = token.split(".")[-1]
         if "." in token and name not in entity_tables:
-            continue  # `JOIN u.orders`, `EXTRACT(YEAR FROM u.created)`
+            continue  # `JOIN u.leads`, `EXTRACT(YEAR FROM u.created)`
         table = entity_tables.get(name)
         if table:
             out.append((table, op))

@@ -53,7 +53,7 @@ TOOLS = [
         "description": (
             "Everything about one node: an endpoint's parameters, responses and documentation, "
             "or a table's columns and who reads and writes it. Accepts a croqui id "
-            "(route:GET:/v1/orders), a bare path (/v1/orders), or a table name (tb_orders)."
+            "(route:GET:/v1/leads), a bare path (/v1/leads), or a table name (tb_leads)."
         ),
         "inputSchema": {
             "type": "object",
@@ -154,7 +154,7 @@ def _tool_node(root: Path, args: dict) -> str:
     text = render_node(graph, root, node)
     if text is None:
         return (f"Nada no mapa com o nome '{node}'. Chame croqui_map para ver os ids "
-                f"— eles se parecem com route:GET:/v1/orders ou table:crm.tb_orders.")
+                f"— eles se parecem com route:GET:/v1/leads ou table:crm.tb_leads.")
     return text
 
 

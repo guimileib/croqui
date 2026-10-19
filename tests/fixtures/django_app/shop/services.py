@@ -1,17 +1,17 @@
-from .models import Order, OrderLine
+from .models import Lead, LeadLine
 
 
-def place_order(customer_id: int, lines: list[dict]) -> Order:
-    order = Order.objects.create(customer_id=customer_id)
-    OrderLine.objects.bulk_create([OrderLine(order=order, **line) for line in lines])
-    return order
+def place_lead(customer_id: int, lines: list[dict]) -> Lead:
+    lead = Lead.objects.create(customer_id=customer_id)
+    LeadLine.objects.bulk_create([LeadLine(lead=lead, **line) for line in lines])
+    return lead
 
 
 class RefundService:
-    """Marks an order as refunded."""
+    """Marks a lead as refunded."""
 
-    def refund(self, order_id: int) -> Order:
-        order = Order.objects.get(pk=order_id)
-        order.status = "refunded"
-        order.save()
-        return order
+    def refund(self, lead_id: int) -> Lead:
+        lead = Lead.objects.get(pk=lead_id)
+        lead.status = "refunded"
+        lead.save()
+        return lead

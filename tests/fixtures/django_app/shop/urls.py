@@ -7,8 +7,8 @@ router = DefaultRouter()
 router.register(r"products", views.ProductViewSet)
 
 urlpatterns = [
-    path("orders/", views.order_list, name="order-list"),
-    path("orders/<int:order_id>/refund/", views.refund_order),
+    path("leads/", views.lead_list, name="lead-list"),
+    path("leads/<int:lead_id>/refund/", views.refund_lead),
     path("customers/<int:pk>/", views.CustomerDetail.as_view()),
     re_path(r"^stats/customers/$", views.customer_count),
     path("health/", views.health),

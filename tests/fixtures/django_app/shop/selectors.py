@@ -1,5 +1,5 @@
-from .models import Order
+from .models import Lead
 
 
-def recent_orders(limit: int = 20):
-    return Order.objects.filter(status="new").order_by("-created_at")[:limit]
+def recent_leads(limit: int = 20):
+    return Lead.objects.filter(status="new").order_by("-created_at")[:limit]

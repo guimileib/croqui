@@ -16,16 +16,16 @@ class UserProfile(db.Model):
     bio = db.Column(db.Text)
 
 
-class Order(db.Model):
-    __tablename__ = "orders"
+class Lead(db.Model):
+    __tablename__ = "leads"
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     status = db.Column(db.String(20))
 
 
-class OrderItem(db.Model):
+class LeadItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"))
+    lead_id = db.Column(db.Integer, db.ForeignKey("leads.id"))
     sku = db.Column(db.String(40))
     quantity = db.Column(db.Integer)

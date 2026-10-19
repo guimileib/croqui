@@ -94,13 +94,13 @@ class ExpressTests(unittest.TestCase):
 
     def test_raw_sql_and_external(self) -> None:
         rid = "route:GET:/api/reports/summary"
-        self.assertEqual(self.edges[(rid, "table:orders", "read")]["ops"], ["SELECT"])  # DDL table
+        self.assertEqual(self.edges[(rid, "table:leads", "read")]["ops"], ["SELECT"])  # DDL table
         self.assertIn((rid, "table:users", "read"), self.edges)
         self.assertIn((rid, "external:HTTP / Webhook", "send"), self.edges)
 
     def test_unknown_tables_are_dropped(self) -> None:
         tables = {n for n in self.graph.nodes if n.startswith("table:")}
-        self.assertEqual(tables, {"table:users", "table:blog_posts", "table:audit_log", "table:orders"})
+        self.assertEqual(tables, {"table:users", "table:blog_posts", "table:audit_log", "table:leads"})
 
 
 class LexerTests(unittest.TestCase):
@@ -122,7 +122,7 @@ class LexerTests(unittest.TestCase):
 
     def test_prisma_and_typeorm_registration(self) -> None:
         idx = OrmIndex.build(FIXTURES / "nest_app")
-        self.assertEqual(idx.prisma, {"order": "orders"})
+        self.assertEqual(idx.prisma, {"lead": "leads"})
         self.assertEqual(idx.entities["User"], "app_users")
 
 
@@ -140,25 +140,25 @@ app.get(`/ping`, (_req: Request, res: Response): void => { res.send('pong'); });
 """,
         "src/routes/index.ts": """
 import { Router } from 'express';
-import ordersRouter from './orders';
+import leadsRouter from './leads';
 const router = Router();
-router.use('/orders', ordersRouter);
+router.use('/leads', leadsRouter);
 export default router;
 """,
-        "src/routes/orders.ts": r"""
+        "src/routes/leads.ts": r"""
 import { Router } from 'express';
 import wrap from 'express-async-handler';
-import { OrderController } from '../controllers/OrderController';
+import { LeadController } from '../controllers/LeadController';
 const router = Router();
-const ctrl = new OrderController();
+const ctrl = new LeadController();
 router.get('/', wrap(ctrl.list));
 router.get('/:id(\d+)', ctrl.get.bind(ctrl));
 router.delete('/:id', wrap(async (req, res) => { await Product.destroy({ where: {} }); }));
 export default router;
 """,
-        "src/controllers/OrderController.ts": """
+        "src/controllers/LeadController.ts": """
 import { getRepository } from 'typeorm';
-export class OrderController {
+export class LeadController {
   list = async (req, res) => { res.json(await Product.findAll()); };
   async get(req, res) { const repo = getRepository(Invoice); res.json(await repo.findOne(1)); }
 }
@@ -188,12 +188,12 @@ Product.init({ id: { type: DataTypes.INTEGER, primaryKey: true } }, { sequelize,
             edges = {(e["from"], e["to"], e["kind"]): e["ops"] for e in graph.edges}
             self.assertEqual(
                 {n for n in graph.nodes if n.startswith("route:")},
-                {"route:GET:/ping", "route:GET:/v1/orders", "route:GET:/v1/orders/{id}", "route:DELETE:/v1/orders/{id}"},
+                {"route:GET:/ping", "route:GET:/v1/leads", "route:GET:/v1/leads/{id}", "route:DELETE:/v1/leads/{id}"},
             )
             # Sequelize default table: model name + "s"
-            self.assertEqual(edges[("route:GET:/v1/orders", "table:products", "read")], ["SELECT"])
-            self.assertEqual(edges[("route:GET:/v1/orders/{id}", "table:invoices", "read")], ["SELECT"])  # getRepository(Invoice)
-            self.assertEqual(edges[("route:DELETE:/v1/orders/{id}", "table:products", "write")], ["DELETE"])
+            self.assertEqual(edges[("route:GET:/v1/leads", "table:products", "read")], ["SELECT"])
+            self.assertEqual(edges[("route:GET:/v1/leads/{id}", "table:invoices", "read")], ["SELECT"])  # getRepository(Invoice)
+            self.assertEqual(edges[("route:DELETE:/v1/leads/{id}", "table:products", "write")], ["DELETE"])
             registry = build_registry(root, code_suffixes=(".js", ".ts"))
             ExpressScanner.register_tables(root, registry)
             self.assertIsNotNone(registry.resolve("invoice_line"))  # bare @Entity() -> snake_case class name

@@ -22,12 +22,12 @@ class Product(models.Model):
     stock = models.IntegerField(default=0)
 
 
-class Order(TimeStamped):
-    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="orders")
+class Lead(TimeStamped):
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name="leads")
     status = models.CharField(max_length=20, default="new")
 
 
-class OrderLine(models.Model):
-    order = models.ForeignKey("Order", on_delete=models.CASCADE)
+class LeadLine(models.Model):
+    lead = models.ForeignKey("Lead", on_delete=models.CASCADE)
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     quantity = models.PositiveIntegerField()

@@ -1,23 +1,23 @@
 package com.acme.shop.api;
 
-import com.acme.shop.service.OrderService;
+import com.acme.shop.service.LeadService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
-@RequestMapping("/orders")
+@RequestMapping("/leads")
 @RequiredArgsConstructor
-public class OrderController {
-    private final OrderService orderService;
+public class LeadController {
+    private final LeadService leadService;
 
     @GetMapping
     public Object list(@RequestParam(required = false) String status) {
-        return orderService.list(status);
+        return leadService.list(status);
     }
 
     @PostMapping("/{id}/cancel")
     public void cancel(@PathVariable long id) {
-        orderService.cancel(id);
+        leadService.cancel(id);
     }
 
     @GetMapping("/health")

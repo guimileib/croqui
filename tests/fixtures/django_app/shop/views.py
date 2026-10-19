@@ -11,17 +11,17 @@ from .serializers import ProductSerializer
 
 
 @api_view(["GET", "POST"])
-def order_list(request):
-    """List recent orders or place a new one."""
+def lead_list(request):
+    """List recent leads or place a new one."""
     if request.method == "POST":
-        order = services.place_order(request.data["customer"], request.data["lines"])
-        return Response({"id": order.id}, status=201)
-    return Response([o.id for o in selectors.recent_orders()])
+        lead = services.place_lead(request.data["customer"], request.data["lines"])
+        return Response({"id": lead.id}, status=201)
+    return Response([o.id for o in selectors.recent_leads()])
 
 
 @api_view(["POST"])
-def refund_order(request, order_id):
-    return Response({"status": services.RefundService().refund(order_id).status})
+def refund_lead(request, lead_id):
+    return Response({"status": services.RefundService().refund(lead_id).status})
 
 
 class CustomerDetail(APIView):

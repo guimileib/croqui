@@ -429,7 +429,7 @@ class ExpressScanner:
                 if span:
                     return other, span
             return None
-        cls_name = js.instances.get(head, head)  # `const ctrl = new OrderController()` / static `OrderController.list`
+        cls_name = js.instances.get(head, head)  # `const ctrl = new LeadController()` / static `LeadController.list`
         for cls in self.project.class_index.get(cls_name, []):
             member = next((m for m in cls.members if m.name == tail), None)
             if member and member.body:

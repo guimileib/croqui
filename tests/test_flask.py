@@ -40,7 +40,7 @@ class FlaskTableTests(unittest.TestCase):
         _, registry = scan(APP)
         names = {r["name"] for r in registry.all()}
         # explicit __tablename__ plus Flask-SQLAlchemy defaults (no __tablename__ declared)
-        self.assertTrue({"orders", "user", "user_profile", "order_item"} <= names)
+        self.assertTrue({"leads", "user", "user_profile", "lead_item"} <= names)
 
     def test_columns_include_mixin_and_fk(self) -> None:
         _, registry = scan(APP)
@@ -62,18 +62,18 @@ class FlaskRouteTests(unittest.TestCase):
 
     def test_blueprint_prefix_and_converters(self) -> None:
         for node_id in (
-            "route:GET:/orders/",
-            "route:POST:/orders/",
-            "route:DELETE:/orders/{order_id}",
-            "route:GET:/orders/{order_id}/items",
+            "route:GET:/leads/",
+            "route:POST:/leads/",
+            "route:DELETE:/leads/{lead_id}",
+            "route:GET:/leads/{lead_id}/items",
         ):
             self.assertIn(node_id, self.graph.nodes)
-        node = self.graph.nodes["route:GET:/orders/"]
+        node = self.graph.nodes["route:GET:/leads/"]
         self.assertEqual(node["kind"], "route")
-        self.assertEqual(node["label"], "GET /orders/")
-        self.assertEqual(node["meta"]["handler"], "list_orders")
-        self.assertEqual(node["meta"]["description"], "List every order.")
-        self.assertTrue(node["meta"]["source"].startswith("app/blueprints/orders.py:"))
+        self.assertEqual(node["label"], "GET /leads/")
+        self.assertEqual(node["meta"]["handler"], "list_leads")
+        self.assertEqual(node["meta"]["description"], "List every lead.")
+        self.assertTrue(node["meta"]["source"].startswith("app/blueprints/leads.py:"))
 
     def test_nested_and_registration_prefixes(self) -> None:
         # users_bp (/users) nested in api_bp (/api); reports_bp mounted with url_prefix
@@ -93,17 +93,17 @@ class FlaskRouteTests(unittest.TestCase):
         self.assertEqual(self.graph.nodes["route:POST:/api/users/"]["meta"]["handler"], "UserCollection.post")
 
     def test_route_service_repo_table_chain(self) -> None:
-        self.edge("route:POST:/orders/", "service:OrderService", "calls")
-        self.edge("service:OrderService", "repo:OrderRepository", "calls")
-        edge = self.edge("repo:OrderRepository", "table:orders", "write")
+        self.edge("route:POST:/leads/", "service:LeadService", "calls")
+        self.edge("service:LeadService", "repo:LeadRepository", "calls")
+        edge = self.edge("repo:LeadRepository", "table:leads", "write")
         self.assertEqual(set(edge["ops"]), {"SELECT", "INSERT", "DELETE"})
-        self.assertNotIn("standalone", self.graph.nodes["route:POST:/orders/"]["meta"])
+        self.assertNotIn("standalone", self.graph.nodes["route:POST:/leads/"]["meta"])
 
     def test_service_external_call(self) -> None:
-        self.edge("service:OrderService", "external:HTTP / Webhook", "send")
+        self.edge("service:LeadService", "external:HTTP / Webhook", "send")
 
     def test_direct_orm_route_to_table(self) -> None:
-        edge = self.edge("route:GET:/orders/{order_id}/items", "table:order_item", "read")
+        edge = self.edge("route:GET:/leads/{lead_id}/items", "table:lead_item", "read")
         self.assertEqual(edge["ops"], ["SELECT"])
 
     def test_methodview_ops_per_verb(self) -> None:
@@ -113,11 +113,11 @@ class FlaskRouteTests(unittest.TestCase):
         self.assertEqual(set(ops), {"SELECT", "DELETE"})
 
     def test_inline_sql_and_helpers(self) -> None:
-        # handler -> _revenue_rows() helper -> text("... FROM orders JOIN user ...")
-        self.edge("route:GET:/reports/revenue", "table:orders", "read")
+        # handler -> _revenue_rows() helper -> text("... FROM leads JOIN user ...")
+        self.edge("route:GET:/reports/revenue", "table:leads", "read")
         self.edge("route:GET:/reports/revenue", "table:user", "read")
         # module-level SQL constant
-        self.edge("route:GET:/reports/top-skus", "table:order_item", "read")
+        self.edge("route:GET:/reports/top-skus", "table:lead_item", "read")
 
     def test_dynamic_sql_is_flagged_not_guessed(self) -> None:
         node = self.graph.nodes["route:GET:/reports/adhoc/{name}"]

@@ -313,7 +313,7 @@ def django_models(index: PyIndex) -> dict[str, dict]:
 
 
 def _dj_route(route: str) -> str:
-    """``orders/<int:pk>/`` -> ``orders/{pk}/``."""
+    """``leads/<int:pk>/`` -> ``leads/{pk}/``."""
     return re.sub(r"<(?:[^:<>]+:)?([^<>]+)>", r"{\1}", route)
 
 
@@ -950,5 +950,5 @@ class _ViewInfo:
 
 
 def _path(full: str) -> str:
-    """``api/`` + ``orders/{pk}/`` pieces -> ``/api/orders/{pk}/``."""
+    """``api/`` + ``leads/{pk}/`` pieces -> ``/api/leads/{pk}/``."""
     return re.sub(r"/{2,}", "/", "/" + full.lstrip("/"))

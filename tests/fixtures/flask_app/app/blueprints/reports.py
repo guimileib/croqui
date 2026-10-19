@@ -5,16 +5,16 @@ from ..extensions import db
 
 bp = Blueprint("reports", __name__)
 
-TOP_SKUS = "SELECT sku, SUM(quantity) FROM order_item GROUP BY sku ORDER BY 2 DESC LIMIT 10"
+TOP_SKUS = "SELECT sku, SUM(quantity) FROM lead_item GROUP BY sku ORDER BY 2 DESC LIMIT 10"
 
 
 def _revenue_rows():
-    return db.session.execute(text("SELECT o.id FROM orders o JOIN user u ON u.id = o.user_id")).all()
+    return db.session.execute(text("SELECT o.id FROM leads o JOIN user u ON u.id = o.user_id")).all()
 
 
 @bp.route("/revenue")
 def revenue():
-    """Orders joined with their users, written as raw SQL."""
+    """Leads joined with their users, written as raw SQL."""
     return jsonify([tuple(r) for r in _revenue_rows()])
 
 

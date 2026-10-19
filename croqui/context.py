@@ -368,7 +368,7 @@ def render_node(ctx_graph: dict, root: Path, node_id: str) -> str | None:
 
 
 def _find(nodes: dict, needle: str) -> dict | None:
-    """Match a node the way a person names one: `/v1/orders`, `GET /v1/orders`, `tb_orders`."""
+    """Match a node the way a person names one: `/v1/leads`, `GET /v1/leads`, `tb_leads`."""
     want = needle.strip().lower()
     for node in nodes.values():
         meta = node.get("meta") or {}

@@ -1,22 +1,22 @@
 from .extensions import db
-from .models import Order
+from .models import Lead
 
 
-class OrderRepository:
-    """Persistence for orders."""
+class LeadRepository:
+    """Persistence for leads."""
 
     def list_all(self):
-        return Order.query.order_by(Order.id).all()
+        return Lead.query.order_by(Lead.id).all()
 
-    def get(self, order_id: int):
-        return Order.query.get(order_id)
+    def get(self, lead_id: int):
+        return Lead.query.get(lead_id)
 
     def add(self, user_id: int, status: str):
-        order = Order(user_id=user_id, status=status)
-        db.session.add(order)
+        lead = Lead(user_id=user_id, status=status)
+        db.session.add(lead)
         db.session.commit()
-        return order
+        return lead
 
-    def remove(self, order_id: int) -> None:
-        Order.query.filter_by(id=order_id).delete()
+    def remove(self, lead_id: int) -> None:
+        Lead.query.filter_by(id=lead_id).delete()
         db.session.commit()

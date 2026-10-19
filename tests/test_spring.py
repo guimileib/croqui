@@ -58,9 +58,9 @@ class JavaFixtureTest(unittest.TestCase):
                 "route:PUT:/api/v1/users/{id}",  # path = {"/{id}", "/legacy/{id}"} -> first
                 "route:DELETE:/api/v1/users/{id}",  # @RequestMapping(method = DELETE, value = ...)
                 "route:GET:/api/v1/users/ping",
-                "route:GET:/api/orders",
-                "route:POST:/api/orders/{id}/cancel",
-                "route:GET:/api/orders/health",
+                "route:GET:/api/leads",
+                "route:POST:/api/leads/{id}/cancel",
+                "route:GET:/api/leads/health",
             },
         )
 
@@ -84,11 +84,11 @@ class JavaFixtureTest(unittest.TestCase):
 
     def test_route_to_service_edges(self) -> None:
         self.assertIn(("route:GET:/api/v1/users/{id}", "service:UserService"), self.edges)
-        self.assertIn(("route:POST:/api/orders/{id}/cancel", "service:OrderService"), self.edges)  # Lombok ctor
-        self.assertIn(("route:GET:/api/orders", "service:OrderService"), self.edges)
+        self.assertIn(("route:POST:/api/leads/{id}/cancel", "service:LeadService"), self.edges)  # Lombok ctor
+        self.assertIn(("route:GET:/api/leads", "service:LeadService"), self.edges)
 
     def test_handler_without_collaborators_is_standalone(self) -> None:
-        for rid in ("route:GET:/api/orders/health", "route:GET:/api/v1/users/ping"):
+        for rid in ("route:GET:/api/leads/health", "route:GET:/api/v1/users/ping"):
             self.assertTrue(self.nodes[rid]["meta"].get("standalone"))
             self.assertFalse([k for k in self.edges if k[0] == rid])
 
@@ -106,13 +106,13 @@ class JavaFixtureTest(unittest.TestCase):
         self.assertEqual(self.nodes["repo:UserRepository"]["meta"]["entity"], "User")
 
     def test_jdbc_repository_text_block_and_concatenated_sql(self) -> None:
-        self.assertIn(("service:OrderService", "repo:OrderJdbcRepository"), self.edges)
-        edge = self.edges[("repo:OrderJdbcRepository", "table:orders")]
+        self.assertIn(("service:LeadService", "repo:LeadJdbcRepository"), self.edges)
+        edge = self.edges[("repo:LeadJdbcRepository", "table:leads")]
         self.assertEqual(sorted(edge["ops"]), ["SELECT", "UPDATE"])
-        self.assertNotIn("unresolved", self.nodes["repo:OrderJdbcRepository"]["meta"])
+        self.assertNotIn("unresolved", self.nodes["repo:LeadJdbcRepository"]["meta"])
 
     def test_external_http_client(self) -> None:
-        edge = self.edges[("service:OrderService", "external:HTTP / Webhook")]
+        edge = self.edges[("service:LeadService", "external:HTTP / Webhook")]
         self.assertEqual(edge["kind"], "send")
 
     def test_entity_columns(self) -> None:
@@ -125,14 +125,14 @@ class JavaFixtureTest(unittest.TestCase):
     def test_default_snake_case_entity_registered(self) -> None:
         registry = build_registry(self.root, code_suffixes=(".java",))
         SpringScanner.register_tables(self.root, registry)
-        rec = registry.resolve("order_item")
+        rec = registry.resolve("lead_item")
         self.assertIsNotNone(rec)
         cols = {c["name"]: c for c in rec["columns"]}
         self.assertEqual(list(cols), ["id", "owner_id", "unit_price", "product_name"])
         self.assertEqual(cols["owner_id"]["references"], "tb_users")
         self.assertEqual(registry.qualified("tb_users"), "core.tb_users")
         # DDL from Flyway stays authoritative for its own table
-        self.assertEqual(registry.resolve("orders")["columns"][0]["type"], "BIGSERIAL")
+        self.assertEqual(registry.resolve("leads")["columns"][0]["type"], "BIGSERIAL")
 
 
 class KotlinFixtureTest(unittest.TestCase):
@@ -211,7 +211,7 @@ class LexerTest(unittest.TestCase):
         self.assertIn("val t = 1", skel)
 
     def test_snake(self) -> None:
-        self.assertEqual(_snake("OrderItem"), "order_item")
+        self.assertEqual(_snake("LeadItem"), "lead_item")
         self.assertEqual(_snake("userAccountId"), "user_account_id")
         self.assertEqual(_snake("email"), "email")
 

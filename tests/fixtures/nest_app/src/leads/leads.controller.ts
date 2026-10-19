@@ -1,22 +1,22 @@
 import { Controller, Get, Param, Post } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service';
-import { OrdersService } from './orders.service';
+import { LeadsService } from './leads.service';
 
-@Controller({ path: 'orders' })
-export class OrdersController {
+@Controller({ path: 'leads' })
+export class LeadsController {
   constructor(
-    private readonly ordersService: OrdersService,
+    private readonly leadsService: LeadsService,
     private readonly auditService: AuditService,
   ) {}
 
   @Get(':id/items')
   items(@Param('id') id: string) {
-    return this.ordersService.items(id);
+    return this.leadsService.items(id);
   }
 
   @Post()
   place() {
-    return this.ordersService.place();
+    return this.leadsService.place();
   }
 
   @Get()

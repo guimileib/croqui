@@ -4,21 +4,21 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public class OrderJdbcRepository {
+public class LeadJdbcRepository {
     private final JdbcTemplate jdbc;
 
-    public OrderJdbcRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+    public LeadJdbcRepository(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
     public Object findByStatus(String status) {
         return jdbc.queryForList("""
             SELECT o.id, o.status
-              FROM orders o
+              FROM leads o
              WHERE o.status = ?
             """, status);
     }
 
     public void cancel(long id) {
-        jdbc.update("UPDATE orders " +
+        jdbc.update("UPDATE leads " +
                     "SET status = 'CANCELLED' WHERE id = ?", id);
     }
 }

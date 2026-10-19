@@ -19,7 +19,7 @@ DESCRIPTION = (
     "which endpoints touch which tables, sequences, or any idea described in words. Use when "
     "the user types /croqui or asks to visualize, diagram or map code, a flow or the database."
 )
-ARGUMENT_HINT = 'what to draw, e.g. "checkout flow" or "tables written by POST /orders"'
+ARGUMENT_HINT = 'what to draw, e.g. "lead qualification flow" or "tables written by POST /leads"'
 
 # The instructions every tool gets. {request} is each tool's argument placeholder.
 BODY = """# croqui: draw what the user asks, cheaply and beautifully
@@ -64,8 +64,8 @@ types are shown as source code, not drawn: express an ER view as a flowchart of
 Style rules, for a diagram that looks good and reads at a glance:
 
 - Start with a frontmatter `title`.
-- Shapes: endpoint `([POST /orders])`, service `[OrderService]`, repository
-  `[[OrderRepository]]`, table `[(tb_orders)]`, decision `{{paid?}}`, external
+- Shapes: endpoint `([POST /leads])`, service `[LeadService]`, repository
+  `[[LeadRepository]]`, table `[(tb_leads)]`, decision `{{qualified?}}`, external
   system `{{{{Stripe}}}}`.
 - Colour with croqui's built-in palette classes. They follow the light/dark
   theme and need no `classDef`: `:::get` `:::post` `:::put` `:::patch`
@@ -81,26 +81,26 @@ Example:
 
 ```mermaid
 ---
-title: Checkout — POST /orders
+title: Leads — POST /leads
 ---
 flowchart LR
   subgraph api["API"]
-    r1([POST /orders]):::post
+    r1([POST /leads]):::post
   end
   subgraph domain["domain"]
-    s1[OrderService]:::service
-    d1{{stock ok?}}:::warn
+    s1[LeadService]:::service
+    d1{{qualified?}}:::warn
   end
   subgraph data["database"]
-    t1[(tb_orders)]:::table
-    t2[(tb_order_item)]:::table
+    t1[(tb_leads)]:::table
+    t2[(tb_lead_note)]:::table
   end
-  pay{{{{Payment API}}}}:::external
+  crm{{{{CRM API}}}}:::external
   r1 ==> s1 ==> d1
   d1 -->|yes| t1
   d1 -->|yes| t2
   d1 -.->|no| r1
-  s1 -->|charge| pay
+  s1 -->|sync| crm
 ```
 
 ## 3. Show it

@@ -38,9 +38,9 @@ class NestTests(unittest.TestCase):
                 "route:POST:/api/users",
                 "route:PUT:/api/users/{id}",
                 "route:DELETE:/api/users/{id}",
-                "route:GET:/api/orders",
-                "route:POST:/api/orders",
-                "route:GET:/api/orders/{id}/items",
+                "route:GET:/api/leads",
+                "route:POST:/api/leads",
+                "route:GET:/api/leads/{id}/items",
             },
         )
         self.assertFalse([n for n in self.graph.nodes if "legacy" in n])  # commented out
@@ -70,21 +70,21 @@ class NestTests(unittest.TestCase):
         self.assertTrue(cols["id"]["pk"])
 
     def test_custom_repository_prisma_chain(self) -> None:
-        self.assertIn(("route:POST:/api/orders", "service:OrdersService", "calls"), self.edges)
-        self.assertIn(("service:OrdersService", "repo:OrdersRepository", "calls"), self.edges)
-        edge = self.edges[("repo:OrdersRepository", "table:orders", "write")]
-        self.assertEqual(edge["ops"], ["INSERT", "SELECT"])  # prisma.order.findUnique / create
+        self.assertIn(("route:POST:/api/leads", "service:LeadsService", "calls"), self.edges)
+        self.assertIn(("service:LeadsService", "repo:LeadsRepository", "calls"), self.edges)
+        edge = self.edges[("repo:LeadsRepository", "table:leads", "write")]
+        self.assertEqual(edge["ops"], ["INSERT", "SELECT"])  # prisma.lead.findUnique / create
         self.assertNotIn("service:PrismaService", self.graph.nodes)
 
     def test_only_used_injected_services_are_linked(self) -> None:
-        # OrdersController injects AuditService but never uses it
+        # LeadsController injects AuditService but never uses it
         self.assertFalse([k for k in self.edges if k[1] == "service:AuditService"])
-        health = self.graph.nodes["route:GET:/api/orders"]["meta"]
+        health = self.graph.nodes["route:GET:/api/leads"]["meta"]
         self.assertTrue(health["standalone"])
-        self.assertFalse([k for k in self.edges if k[0] == "route:GET:/api/orders"])
+        self.assertFalse([k for k in self.edges if k[0] == "route:GET:/api/leads"])
 
     def test_stack_and_prisma_map(self) -> None:
-        self.assertEqual(OrmIndex.build(APP).prisma, {"order": "orders"})
+        self.assertEqual(OrmIndex.build(APP).prisma, {"lead": "leads"})
         self.assertEqual(NestScanner.stack, "node/nestjs")
 
 
