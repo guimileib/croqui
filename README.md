@@ -66,6 +66,8 @@ croqui serve      # open the editable map on localhost:7777
 croqui build      # one self-contained .html — map + PRD + diagrams, no server
 croqui prd        # write the PRD from the map, with whatever model you have
 croqui context    # the same map as text, for an LLM's context window
+croqui draw       # a styled mermaid diagram of an endpoint, table or module, from the map
+croqui lint       # check a mermaid file against what the UML tab actually draws
 croqui mcp        # run as an MCP server, so an agent can read it and write documents
 croqui engines    # which models this machine can talk to
 croqui update     # update croqui itself
@@ -137,7 +139,7 @@ Every stroke on the page — the generated map and the shapes you draw on it —
 | **drag on the paper** | sweep a selection rectangle — boxes and drawings light up as it grows. Dragging any picked item moves them all in a single undo step. **Esc** or a click on the paper clears it |
 | **shift+click** / **shift+drag** | add to the selection instead of starting over |
 | **Ctrl+A** | select every box and drawing on the map |
-| **Space + drag**, or the middle button | pan, with the grabbing hand — from anywhere, even starting on a box |
+| **Space + drag**, the middle button, or the hand tool (`h`) | pan, with the grabbing hand — from anywhere, even starting on a box |
 | **Ctrl+Z / Ctrl+Shift+Z** | undo / redo — up to 100 steps |
 | **Ctrl+S** or **salvar alterações** | write `layout.json` — the arrangement you see, plus the view. Nothing is written before that |
 | **órfãs** | appears only when the layout names nodes the code no longer has; lists them and can discard them |
@@ -150,7 +152,9 @@ Every stroke on the page — the generated map and the shapes you draw on it —
 | **roda / shift+roda** | zoom / pan |
 | **URL** | `…/croqui.html#node=route:GET:/v2/crm/leads` deep-links straight to one endpoint |
 
-Dark and light follow the OS. `✍` switches to a handwriting font where the OS has one.
+Dark and light follow the OS. `✍` switches the whole map to handwriting — Virgil, Excalidraw's own hand, shipped with the viewer (SIL OFL) and inlined by `croqui build`, so it looks the same on every machine.
+
+**−  100%  +** in the bottom-left corner zooms about the middle of the screen; the readout fits the map. `+` / `-` on the keyboard do the same.
 
 ## One file, three tabs
 
@@ -349,6 +353,30 @@ things) instead of crawling the source, opens at most three files for what the m
 cannot say, and never calls `enrich`/`prd` unless asked. Then `croqui build .` makes
 the page. `croqui install --uninstall` removes the files.
 
+### Diagrams for free: `croqui draw` and `croqui lint`
+
+The cheapest diagram is the one the model does not have to write.
+
+```sh
+croqui draw "POST /v1/leads"        # the endpoint, its chain to the database, who calls it
+croqui draw leads tb_leads --direction TB
+croqui draw                         # an overview, sampled to 25 nodes
+croqui lint                         # every diagram in the UML folder
+```
+
+`draw` reads `graph.json` and writes `.croqui/uml/<name>.mmd` already styled — a
+subgraph per layer, croqui's palette classes by kind and HTTP verb, `grava: insert`
+on write edges, dotted reads — with zero model tokens. The output is deterministic,
+capped at `--max-nodes` (a `%%` comment says what it left out) and marked
+`%% croqui:draw`, so a re-run refreshes it; delete that line to keep your edits.
+It never touches `relacoes.mmd` or a file somebody else wrote, unless `--force`.
+
+`lint` ports the viewer's parser, so it reports what the UML tab will really draw:
+unbalanced `subgraph`/`end` (error, exit 1), unsupported diagram types, unknown
+classes, more than 25 nodes, `A-->B` glued arrows the viewer would read as a node,
+overlong labels. A model runs it before `croqui build` instead of iterating on a
+picture it cannot see. Both are also MCP tools: `croqui_draw` and `croqui_lint`.
+
 ### MCP
 
 For Claude Code and Claude Desktop, the same thing without the copy-paste:
@@ -378,14 +406,24 @@ that believes it saved your work.
 
 ## Drawing on the map
 
-A generated map answers *what the code does*. The things you need to write on top of it — this whole column is legacy, that queue is coming next quarter, these two services agree on a contract nothing in the source states — are not in the code, so no scanner will ever produce them. The tool rail on the left is for those.
+A generated map answers *what the code does*. The things you need to write on top of it — this whole column is legacy, that queue is coming next quarter, these two services agree on a contract nothing in the source states — are not in the code, so no scanner will ever produce them. The tool bar at the top is for those.
+
+It is Excalidraw's bar, tool for tool and key for key — 1 to 0 run along it in the same order — so a hand trained there works here. The shapes croqui adds on top (triangle, hexagon, cylinder, cloud), the frame and the laser wait behind **⋯**, which wears the icon of whichever of them is armed.
 
 | Tool | | |
 |---|---|---|
-| shapes | `r` `o` `d` `t` `h` `c` `n` | rectangle, ellipse, diamond, triangle, hexagon, cylinder, cloud |
-| arrows | `a` `l` | arrow and plain line, with a head at one end, both, or neither — an end drawn into a box holds on to it |
-| text box | `x`, or **double-click** the paper | resizable, borderless, in any colour and size |
-| relation | `e` | a new edge between two existing nodes, with your own label |
+| lock | `q` | keeps the tool armed after each shape, to draw a series — Excalidraw's padlock |
+| hand | `h`, or hold **Space** | drag the paper around; nothing else answers to a click |
+| selection | `v` `1` | pick, move, resize, sweep a selection |
+| shapes | `r` `2` · `d` `3` · `o` `4` | rectangle, diamond, ellipse — and under **⋯**: triangle, hexagon, cylinder `c`, cloud `n` |
+| arrows | `a` `5` · `l` `6` | arrow and plain line, with a head at one end, both, or neither — an end drawn into a box holds on to it |
+| freehand | `p` `7` | a pencil stroke, smoothed; it resizes like any other drawing |
+| text | `t` `x` `8`, or **double-click** the paper | resizable, borderless, in any colour, size and font |
+| image | `9` | pick a picture from disk; it lands in view, like a pasted one |
+| eraser | `e` `0` | drag over drawings to fade them; letting go deletes them, in one undo step. An unfilled shape is only caught on its outline |
+| frame | `g` | a named container, ruled straight, its name above the top-left corner — double-click it to rename |
+| laser | `k` | a red trail that fades on its own, for pointing on a shared screen. Never saved |
+| relation | `j` | a new edge between two existing nodes, with your own label |
 | image | **Ctrl+V** | a pasted picture — a screenshot, a whiteboard photo, a Grafana panel |
 | a drawing from Excalidraw | **Ctrl+V** | boxes, diamonds, ellipses, arrows, lines, text and images, in the arrangement they were copied in |
 
@@ -396,8 +434,13 @@ Drag to size it, or click once for a sensible default. Everything is drawn with 
 - a text box with **preenchida** off is just the writing: no background, and no frame either once there is text in it (an empty one keeps a faint dashed outline, or you would never find it)
 - **drag the handles** to resize; arrows get one handle per end. Let an end go **inside a box** — a node, or any drawing of yours — and it holds on to that box: the tip sits on its edge and follows it wherever it goes. A filled handle is an end that is holding on; **Ctrl** while letting go keeps it free; dragging the arrow itself lets go of both ends, and where it lands decides anew
 - **Del** removes what is selected, **Esc** puts the pointer tool back
-- **A− / A+** in the inspector sets the size of the letters, from 9 to 44px — on the selected drawing, or, with nothing selected, on the next one you draw
-- the small panel next to the rail sets colour, fill, dashes, arrow heads, whether the shape sits **behind** the map (the default, so a rectangle works as a frame around a chain) or **à frente**, and which node it is **attached** to
+- **drag a corner** and the letters scale with the box, in px — a bigger square is bigger writing, as in Excalidraw. A **side** handle only reshapes it, which is how you change where a text box wraps
+- **P / M / G / GG** and **A− / A+** in the inspector set the size of the letters, from 8 to 160px — on the selected drawing, or, with nothing selected, on the next one you draw
+- **font**: handwriting (Virgil), normal or code, per drawing — Excalidraw's three families. New drawings start in handwriting; drawings made before this follow the `✍` toggle as they always did
+- **fill** none / hachure / solid, **stroke** thin / medium / bold, **line** solid / dashed / dotted, **sloppiness** architect / artist / cartoonist, **alignment** left / centre / right — the properties panel is laid out like Excalidraw's, and pasting from Excalidraw keeps all of them
+- **Ctrl+D** duplicates the selected drawing, the **arrow keys** nudge it (Shift: a grid square), and each tool shows its key in its corner
+- **Ctrl+C** / **Ctrl+X** put the selection on the clipboard as an Excalidraw copy: paste it into Excalidraw and it arrives as Excalidraw shapes; paste it back here and it comes out exactly as it went in, because each element also carries the croqui drawing in `customData`
+- the properties panel on the left sets colour, fill, dashes, arrow heads, whether the shape sits **behind** the map (the default, so a rectangle works as a frame around a chain) or **à frente**, and which node it is **attached** to
 
 ### Pasted images
 
@@ -443,11 +486,13 @@ redraws it with its own pencil:
 |---|---|
 | rectangle, diamond, ellipse | the same shape, at the same size |
 | arrow, line | arrow or line, keeping direction and which ends carry a head — and which box each end held on to, when that box came along in the same copy |
-| text | a text box, at the font size it had, clamped to the 9–44px croqui draws in |
+| text | a text box, at the font size it had (8–160px), in the matching family — Virgil/Excalifont as handwriting, Cascadia/Comic Shanns as code, the rest as normal — and with its alignment |
+| freehand | a freehand stroke, point for point |
+| frame | a croqui frame, with its name |
 | a label inside a box | that box's own writing — not a second shape on top of it |
 | a label on an arrow | a text box of its own, where Excalidraw had it (croqui's arrows hold no text) |
 | stroke colour | the nearest of croqui's eight colours; a neutral stroke becomes `ink`, which follows the theme |
-| background, dashes | **preenchida** and **tracejada** on the shape |
+| background, stroke | solid fill as croqui's tint, hachure/cross-hatch/zigzag as its hatching; stroke width, solid/dashed/dotted and sloppiness carried over |
 | image (PNG, JPEG, GIF, WebP) | an image, same place and size — stored in `.croqui/images/` like any pasted picture; arrows tied to it stay tied |
 
 The arrangement is preserved — the whole copy moves as a group to your cursor, in the
@@ -455,8 +500,8 @@ order it was stacked — and the paste is a single undo step. Anything that land
 node attaches to it like any other drawing.
 
 A few things do not survive the crossing, and the toast says which of them turned up
-(*8 desenhos colados — fora: 1 rabisco*): **freehand ink**, **frames and embeds** and
-**SVG images** — croqui has no counterpart for them — and an **elbowed arrow**, which
+(*8 desenhos colados — fora: 1 embed*): **embeds** and **SVG images** — croqui has no
+counterpart for them — and an **elbowed arrow**, which
 arrives as a straight run between its two ends. **Rotation** is lost too: a tilted
 rectangle comes in square. Images need `croqui serve` (they are written to disk); in a
 read-only `croqui.html` the rest of the copy still pastes and the toast says the
@@ -639,6 +684,7 @@ writes says that too.
 |---|---|---|
 | Python / FastAPI | `APIRouter`, `Depends` DI, prefixes | SQLAlchemy models, inline SQL |
 | Python / Flask | `@app.route`, Blueprints (nested), `MethodView`, `add_url_rule`, flask-restful | Flask-SQLAlchemy (`db.Model`), `session`, inline SQL |
+| Any code (`code/structure`) | entry points: `[project.scripts]`, `__main__`, package.json `bin`/`main`, `main()` in Java/Kotlin/Go, `bin/`, `scripts/` | modules and their imports (Python, JS/TS, Java/Kotlin, Go), third-party packages, inline SQL |
 | Python / Django | `urls.py` + `include`, function and class-based views, DRF viewsets and routers, `@action` | Django ORM models (`db_table` or `app_model`), `objects` chains, `.raw`, cursors |
 | Node / Express | `app`/`router` verbs, `router.route()`, `use()` mounts across files | Prisma, TypeORM, Sequelize, Knex, raw SQL |
 | Node / NestJS | `@Controller` + `@Get`…, global prefix, versioning, `@ApiOperation` | TypeORM `@InjectRepository`, Prisma, custom repositories |
@@ -648,6 +694,17 @@ Every stack resolves route → service → repository → table, plus routes tha
 tables directly, and only draws tables the repo itself defines (DDL, migrations or ORM
 models). A monorepo with several stacks gets one map: `scan` runs every adapter it
 detects. `--stack python/django,node/nestjs` overrides detection.
+
+### Code that is not an API
+
+A CLI, a library, a worker or a game has no routes, and `scan` no longer gives up on
+it. When no API framework is found — or one is detected but yields no route at all,
+the way croqui itself mentions Flask in its own source — it maps the **structure**
+instead: entry points on the left, modules spread into lanes by import depth (what
+nothing imports first, what everything leans on last), third-party packages on the
+right, and the tables any inline SQL touches. Past 80 source files, modules are
+folded per directory so the map stays readable. `--stack code/structure` forces it,
+and it combines with an API stack in a monorepo.
 
 Adapters live in `croqui/adapters/`, one module per stack.
 

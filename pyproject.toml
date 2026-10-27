@@ -50,7 +50,7 @@ Issues = "https://github.com/guimileib/croqui/issues"
 packages = ["croqui", "croqui.adapters"]
 
 [tool.setuptools.package-data]
-croqui = ["viewer/*.html", "viewer/*.js", "viewer/*.css"]
+croqui = ["viewer/*.html", "viewer/*.js", "viewer/*.css", "viewer/*.svg", "viewer/fonts/*"]
 
 # The version lives only in croqui/__init__.py — bump it there and nowhere else.
 [tool.setuptools.dynamic]

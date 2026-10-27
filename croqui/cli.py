@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 
 from . import __version__
-from .adapters import ADAPTERS, detect_stacks
+from .adapters import ADAPTERS, FALLBACK_STACK, detect_stacks
 from .docs import collect_docs, summarize
 from .model import Graph, load_graph
 from .scaffold import PRD_FILE
@@ -56,6 +56,10 @@ def cmd_scan(args: argparse.Namespace) -> int:
         return 2
 
     stacks = [s.strip() for s in args.stack.split(",") if s.strip()] if args.stack else detect_stacks(root)
+    fallback = False
+    if not stacks and not args.stack and ADAPTERS[FALLBACK_STACK].detect(root):
+        # Not an API (a CLI, a library, a worker…): map the code's own structure instead.
+        stacks, fallback = [FALLBACK_STACK], True
     if not stacks:
         _say(f"{RED}could not detect the stack.{RESET} Pass --stack (one or more of: {', '.join(ADAPTERS)})")
         return 2
@@ -66,6 +70,8 @@ def cmd_scan(args: argparse.Namespace) -> int:
     stack = ", ".join(stacks)
 
     _say(f"{BOLD}croqui{RESET} scanning {root.name} {DIM}({stack}){RESET}")
+    if fallback:
+        _say(f"  {DIM}· no API framework found — mapping modules and entry points{RESET}")
 
     registry = build_registry(root, code_suffixes=CODE_SUFFIXES)
     for name in stacks:
@@ -81,19 +87,43 @@ def cmd_scan(args: argparse.Namespace) -> int:
         scanner.scan()
         scanners.append(scanner)
 
+    # Detection reads text, so a project that merely *mentions* Flask — a linter, a
+    # code generator, croqui itself — is detected as an API and comes out empty.
+    # No routes at all is the tell: map the structure rather than write a blank map.
+    if not args.stack and FALLBACK_STACK not in stacks and not graph.counts().get("route"):
+        scanner = ADAPTERS[FALLBACK_STACK](root, graph, registry, openapi=args.openapi)
+        scanner.scan()
+        if graph.counts().get("module"):
+            scanners.append(scanner)
+            stacks.append(FALLBACK_STACK)
+            graph.project["stack"] = ", ".join(stacks)
+            _say(f"  {DIM}· no routes found — mapping modules and entry points instead{RESET}")
+
     if graph.project.get("openapi"):
         _say(f"  {GREEN}✓{RESET} spec: {graph.project['openapi']}")
-    else:
+    elif graph.counts().get("route"):
         _say(f"  {YELLOW}!{RESET} no OpenAPI spec found — routes come from code only, without docs")
 
     graph.drop_dangling_edges()
     dropped = graph.drop_isolated_nodes()
 
     counts = graph.counts()
-    _say(
-        f"  {GREEN}✓{RESET} {counts.get('route', 0)} routes · {counts.get('service', 0)} services · "
-        f"{counts.get('repo', 0)} repositories · {counts.get('table', 0)} tables · {len(graph.edges)} edges"
-    )
+    if counts.get("entry") or counts.get("module"):
+        # A code map has no use for "0 routes · 0 services"; say only what is there.
+        parts = [
+            f"{counts[kind]} {word}"
+            for kind, word in (
+                ("entry", "entries"), ("module", "modules"), ("route", "routes"), ("service", "services"),
+                ("repo", "repositories"), ("table", "tables"),
+            )
+            if counts.get(kind)
+        ]
+        _say(f"  {GREEN}✓{RESET} {' · '.join(parts)} · {len(graph.edges)} edges")
+    else:
+        _say(
+            f"  {GREEN}✓{RESET} {counts.get('route', 0)} routes · {counts.get('service', 0)} services · "
+            f"{counts.get('repo', 0)} repositories · {counts.get('table', 0)} tables · {len(graph.edges)} edges"
+        )
     if dropped:
         _say(f"  {DIM}· {dropped} isolated nodes dropped{RESET}")
 
@@ -317,6 +347,56 @@ def cmd_context(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_draw(args: argparse.Namespace) -> int:
+    """A styled Mermaid flowchart from the map, with no model involved."""
+    from .draw import DrawError, draw, write
+
+    # `croqui draw "/v1/leads"` names no path: the first word is one only when it is a
+    # scanned project, so a target that happens to match a folder is still a target.
+    items = list(args.items)
+    if items and (Path(items[0]) / OUT_DIR / GRAPH_FILE).is_file():
+        root, targets = Path(items[0]).resolve(), items[1:]
+    else:
+        root, targets = Path(".").resolve(), items
+    graph_path = root / OUT_DIR / GRAPH_FILE
+    if not graph_path.is_file():
+        _say(f"{RED}no graph yet.{RESET} Run {BOLD}croqui scan .{RESET} first.")
+        return 2
+    try:
+        drawing = draw(
+            load_graph(graph_path), targets,
+            depth=args.depth, up=args.up, max_nodes=args.max_nodes,
+            direction=args.direction, title=args.title,
+        )
+        if args.stdout:
+            print(drawing.text, end="")
+            return 0
+        path, status = write(root, drawing, name=args.name, force=args.force)
+    except DrawError as exc:
+        _say(f"{RED}{exc}{RESET}")
+        return 2
+    for name in drawing.missing:
+        _say(f"{YELLOW}!{RESET} nada no mapa com o nome '{name}'")
+    left = f", {drawing.omitted} fora" if drawing.omitted else ""
+    rel = path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path)
+    _say(f"{GREEN}✓{RESET} {rel} {DIM}({status}, {drawing.nodes} nós{left}){RESET}")
+    return 0
+
+
+def cmd_lint(args: argparse.Namespace) -> int:
+    """Check Mermaid files against what the viewer draws; exit 1 on an error."""
+    from .lint import LintError, as_json, has_errors, lint_paths, render
+
+    root = Path(args.path).resolve()
+    try:
+        issues, checked = lint_paths(root, args.files)
+    except LintError as exc:
+        _say(f"{RED}{exc}{RESET}")
+        return 2
+    print(as_json(issues, checked) if args.json else render(issues, checked), end="")
+    return 1 if has_errors(issues) else 0
+
+
 def cmd_mcp(args: argparse.Namespace) -> int:
     from .mcp import serve_stdio
 
@@ -439,6 +519,33 @@ def build_parser() -> argparse.ArgumentParser:
     p_context.add_argument("--full", action="store_true", help="include full endpoint docs and document text")
     p_context.add_argument("--node", help="everything about one node: an id, a path, or a table name")
     p_context.set_defaults(func=cmd_context)
+
+    p_draw = subs.add_parser(
+        "draw",
+        help="draw a styled Mermaid diagram from the map, no model needed (see also: croqui lint)",
+    )
+    p_draw.add_argument("items", nargs="*", metavar="[path] target",
+                        help="a project path (optional), then node ids, endpoint paths, tables or services; "
+                             "none draws an overview")
+    p_draw.add_argument("--name", help="file name in the uml folder (default: from the targets)")
+    p_draw.add_argument("--direction", type=str.upper, choices=["LR", "TB"], default="LR")
+    p_draw.add_argument("--title", help="diagram title (default: from the targets)")
+    p_draw.add_argument("--depth", type=int, default=4, help="hops downstream of each target (default 4)")
+    p_draw.add_argument("--up", type=int, default=1, help="hops upstream, who calls the target (default 1)")
+    p_draw.add_argument("--max-nodes", type=int, default=25, help="never draw more than this (default 25)")
+    p_draw.add_argument("--stdout", action="store_true", help="print the diagram instead of writing it")
+    p_draw.add_argument("--force", action="store_true",
+                        help="overwrite a file `croqui draw` did not write")
+    p_draw.set_defaults(func=cmd_draw)
+
+    p_lint = subs.add_parser(
+        "lint",
+        help="check Mermaid files against what the viewer draws (default: the whole uml folder)",
+    )
+    p_lint.add_argument("files", nargs="*")
+    p_lint.add_argument("--path", default=".", help="the project (default: .)")
+    p_lint.add_argument("--json", action="store_true", help="structured output")
+    p_lint.set_defaults(func=cmd_lint)
 
     p_mcp = subs.add_parser(
         "mcp",

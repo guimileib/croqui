@@ -32,7 +32,11 @@ CONTENT_TYPES = {
     ".jpg": "image/jpeg",
     ".gif": "image/gif",
     ".webp": "image/webp",
+    ".woff2": "font/woff2",
 }
+# Fonts the viewer ships with. Named here rather than globbed so the handler can
+# never be talked into serving anything else out of the viewer folder.
+FONTS = ("Virgil.woff2",)
 
 
 def _make_handler(root: Path):
@@ -134,6 +138,8 @@ def _make_handler(root: Path):
                 self._send(layout.read_bytes() if layout.is_file() else b"{}", CONTENT_TYPES[".json"])
             elif route in ("/app.js", "/diagram.js", "/style.css"):
                 self._static(route.lstrip("/"))
+            elif route.startswith("/fonts/") and route[len("/fonts/"):] in FONTS:
+                self._static(route.lstrip("/"))
             elif route.startswith("/images/"):
                 self._image(route[len("/images/"):])
             elif route.startswith("/prd/"):
@@ -232,6 +238,14 @@ def build_bundle(root: Path) -> str:
     )
     # </script> inside JSON would close the tag early.
     payload = payload.replace("</", "<\\/")
+
+    # The handwriting font travels inside the bundle too, or a mailed snapshot
+    # falls back to whatever cursive the reader's OS happens to have.
+    for name in FONTS:
+        font = VIEWER / "fonts" / name
+        if font.is_file():
+            data = base64.b64encode(font.read_bytes()).decode("ascii")
+            css = css.replace(f'url("fonts/{name}")', f'url("data:font/woff2;base64,{data}")')
 
     html = html.replace('<link rel="stylesheet" href="style.css">', f"<style>\n{css}\n</style>")
     html = html.replace('<script src="diagram.js"></script>', f"<script>\n{diagram}\n</script>")

@@ -22,7 +22,9 @@ MAX_COLUMNS = 40
 MAX_DOC_CHARS = 20000
 
 KIND_LABEL = {
+    "entry": "entrada",
     "route": "endpoint",
+    "module": "módulo",
     "service": "serviço",
     "repo": "repositório",
     "table": "tabela",
@@ -123,6 +125,21 @@ def build(root: Path, graph: dict, *, full: bool = False) -> dict:
         endpoints.append(entry)
     endpoints.sort(key=lambda e: (e.get("group") or "", e.get("path") or "", e.get("method") or ""))
 
+    entries = []
+    for node in nodes.values():
+        if node["kind"] != "entry":
+            continue
+        meta = node.get("meta") or {}
+        entries.append({
+            "id": node["id"],
+            "label": node["label"],
+            "command": meta.get("command"),
+            "source": meta.get("file"),
+            "summary": _clip(meta.get("summary"), SUMMARY_CHARS) or None,
+            "chains": [_chain_text(p) for p in _chain(node["id"], nodes, out) if p],
+        })
+    entries.sort(key=lambda e: e["label"])
+
     tables = []
     for node in nodes.values():
         if node["kind"] != "table":
@@ -150,7 +167,7 @@ def build(root: Path, graph: dict, *, full: bool = False) -> dict:
                 {
                     "id": n["id"],
                     "label": n["label"],
-                    "source": (n.get("meta") or {}).get("source"),
+                    "source": (n.get("meta") or {}).get("source") or (n.get("meta") or {}).get("file"),
                     "uses": [nodes[e["to"]]["label"] for e in (out.get(n["id"]) or []) if e["to"] in nodes],
                 }
                 for n in nodes.values()
@@ -174,7 +191,9 @@ def build(root: Path, graph: dict, *, full: bool = False) -> dict:
         "croqui_context": 1,
         "project": graph.get("project") or {},
         "stats": graph.get("stats") or {},
+        "entries": entries,
         "endpoints": endpoints,
+        "modules": _plain("module"),
         "services": _plain("service"),
         "repositories": _plain("repo"),
         "tables": tables,
@@ -212,6 +231,8 @@ def writing_guide(root: Path) -> dict:
             f"Escreva um arquivo novo ao lado, ou apague a linha `%% {MARKER}` para tomar posse dele.",
             ".croqui/graph.json — derivado do código. Mude o código e rode `croqui scan`.",
         ],
+        "draw": "Diagrama pronto, sem gastar tokens: `croqui draw \"<alvo>\"`; edite só o que o mapa "
+                "não sabe e confira com `croqui lint`.",
         "after_writing": "Nada a fazer: a aba relê o disco a cada reload. "
                          "Rode `croqui scan` só quando o código mudar.",
     }
@@ -230,7 +251,8 @@ def render(ctx: dict, *, full: bool = False) -> str:
     add(f"# croqui — {project.get('name', 'projeto')}")
     counted = " · ".join(
         f"{stats.get(kind, 0)} {word}"
-        for kind, word in (("route", "endpoints"), ("service", "serviços"),
+        for kind, word in (("entry", "entradas"), ("route", "endpoints"),
+                           ("module", "módulos"), ("service", "serviços"),
                            ("repo", "repositórios"), ("table", "tabelas"))
         if stats.get(kind)
     )
@@ -240,6 +262,19 @@ def render(ctx: dict, *, full: bool = False) -> str:
     add("toca qual tabela. É derivado do código, não escrito à mão — quando ele e a")
     add("prosa discordarem, a prosa está velha ou o código está errado.")
     add("")
+
+    if ctx.get("entries"):
+        add("## entradas")
+        for entry in ctx["entries"]:
+            head = f"- **{entry['label']}**"
+            if entry.get("summary"):
+                head += f" — {entry['summary']}"
+            add(head)
+            if entry.get("source"):
+                add(f"  - `{entry['source']}`")
+            for chain in entry.get("chains") or []:
+                add(f"  - {chain}")
+        add("")
 
     if ctx.get("endpoints"):
         add("## endpoints")
@@ -279,7 +314,8 @@ def render(ctx: dict, *, full: bool = False) -> str:
                 add(f"  - {how}: {', '.join(who)}")
         add("")
 
-    for key, title in (("services", "serviços"), ("repositories", "repositórios"), ("external", "externos")):
+    for key, title in (("modules", "módulos"), ("services", "serviços"),
+                       ("repositories", "repositórios"), ("external", "externos")):
         if ctx.get(key):
             add(f"## {title}")
             for node in ctx[key]:
@@ -309,6 +345,8 @@ def render(ctx: dict, *, full: bool = False) -> str:
         add(f"- **{section.upper()}** → `{item.get('where', '')}`. {item.get('how', '')}")
     for warning in guide.get("do_not_touch") or []:
         add(f"- ⚠ {warning}")
+    if guide.get("draw"):
+        add(f"- {guide['draw']}")
     if guide.get("after_writing"):
         add(f"- {guide['after_writing']}")
     add("")
@@ -367,18 +405,22 @@ def render_node(ctx_graph: dict, root: Path, node_id: str) -> str | None:
     return "\n".join(lines) + "\n"
 
 
+def _names(node: dict) -> set[str]:
+    """Every way a person may name this node, lowercased."""
+    meta = node.get("meta") or {}
+    return {
+        str(node["id"]).lower(),
+        str(node["label"]).lower(),
+        str(meta.get("path") or "").lower(),
+        f"{meta.get('method', '')} {meta.get('path', '')}".strip().lower(),
+    }
+
+
 def _find(nodes: dict, needle: str) -> dict | None:
     """Match a node the way a person names one: `/v1/leads`, `GET /v1/leads`, `tb_leads`."""
     want = needle.strip().lower()
     for node in nodes.values():
-        meta = node.get("meta") or {}
-        candidates = {
-            str(node["id"]).lower(),
-            str(node["label"]).lower(),
-            str(meta.get("path") or "").lower(),
-            f"{meta.get('method', '')} {meta.get('path', '')}".strip().lower(),
-        }
-        if want in candidates:
+        if want in _names(node):
             return node
     return None
 

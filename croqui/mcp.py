@@ -96,6 +96,48 @@ TOOLS = [
         },
     },
     {
+        "name": "croqui_draw",
+        "description": (
+            "Draw a styled Mermaid flowchart straight from the map, with no model involved: the "
+            "endpoint, its chain down to the tables, and who calls it. Use this before writing a "
+            "diagram by hand, then edit only what the map cannot know (a business condition, a "
+            "better name). Without `targets` it draws an overview. Writes into uml/ and replaces "
+            "only a file it wrote itself; refuses anything else unless `force` is true."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "targets": {"type": "array", "items": {"type": "string"},
+                            "description": "node ids, endpoint paths (/v1/leads, POST /v1/leads), "
+                                           "tables or service names"},
+                "name": {"type": "string", "description": "file name, e.g. fluxo-leads.mmd (default: from the targets)"},
+                "direction": {"type": "string", "enum": ["LR", "TB"], "default": "LR"},
+                "title": {"type": "string"},
+                "depth": {"type": "integer", "default": 4, "description": "hops downstream of each target"},
+                "max_nodes": {"type": "integer", "default": 25},
+                "preview": {"type": "boolean", "default": False,
+                            "description": "return the Mermaid instead of writing the file"},
+                "force": {"type": "boolean", "default": False},
+            },
+        },
+    },
+    {
+        "name": "croqui_lint",
+        "description": (
+            "Check Mermaid diagrams against what the viewer actually draws: unsupported types, "
+            "unbalanced subgraph/end, unknown classes, too many nodes, ignored lines. One line "
+            "per problem as file:line: level: message. Run it after writing a diagram. Without "
+            "`files` it checks every diagram in uml/."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "files": {"type": "array", "items": {"type": "string"},
+                          "description": "paths relative to the project root"},
+            },
+        },
+    },
+    {
         "name": "croqui_scan",
         "description": (
             "Re-read the source and rebuild the map, the way `croqui scan` does. Run it after "
@@ -219,6 +261,59 @@ def _tool_write_doc(root: Path, args: dict) -> str:
             f"for recarregada — nada de re-scan.")
 
 
+def _int(args: dict, key: str, default: int) -> int:
+    try:
+        return int(args.get(key, default))
+    except (TypeError, ValueError) as exc:
+        raise Refused(f"`{key}` tem de ser um número inteiro.") from exc
+
+
+def _tool_draw(root: Path, args: dict) -> str:
+    from .draw import DrawError, draw, write
+
+    graph = _graph(root)
+    if graph is None:
+        return _no_graph()
+    targets = args.get("targets") or []
+    if isinstance(targets, str):
+        targets = [targets]
+    try:
+        drawing = draw(
+            graph, [str(t) for t in targets],
+            depth=_int(args, "depth", 4), max_nodes=_int(args, "max_nodes", 25),
+            direction=str(args.get("direction") or "LR"), title=args.get("title") or None,
+        )
+        if args.get("preview"):
+            return drawing.text
+        path, status = write(root, drawing, name=args.get("name") or None, force=bool(args.get("force")))
+    except DrawError as exc:
+        raise Refused(str(exc)) from exc
+    rel = path.relative_to(root) if path.is_relative_to(root) else path
+    note = f" Sem nó no mapa para: {', '.join(drawing.missing)}." if drawing.missing else ""
+    left = f", {drawing.omitted} nós fora" if drawing.omitted else ""
+    return (f"{status.capitalize()}: `{rel.as_posix()}` ({drawing.nodes} nós{left}).{note} "
+            f"Ajuste só o que o mapa não sabe, rode croqui_lint e, para ver, `croqui build .`.")
+
+
+def _tool_lint(root: Path, args: dict) -> str:
+    from .lint import LintError, lint_paths, render
+
+    files = args.get("files") or []
+    if isinstance(files, str):
+        files = [files]
+    resolved: list[str] = []
+    for name in files:
+        path = (root / str(name)).resolve()
+        if not path.is_relative_to(root.resolve()):
+            raise Refused(f"`{name}` está fora do projeto.")
+        resolved.append(str(path))
+    try:
+        issues, checked = lint_paths(root, resolved)
+    except LintError as exc:
+        raise Refused(str(exc)) from exc
+    return render(issues, checked)
+
+
 def _tool_scan(root: Path, args: dict) -> str:
     from .cli import build_parser, cmd_scan
 
@@ -264,6 +359,8 @@ HANDLERS = {
     "croqui_node": _tool_node,
     "croqui_docs": _tool_docs,
     "croqui_write_doc": _tool_write_doc,
+    "croqui_draw": _tool_draw,
+    "croqui_lint": _tool_lint,
     "croqui_scan": _tool_scan,
 }
 
@@ -286,7 +383,8 @@ def handle(root: Path, message: dict) -> dict | None:
             "instructions": (
                 "croqui maps this project's API and database from its source. Call croqui_map "
                 "before answering questions about how the system fits together, croqui_node for "
-                "one endpoint or table, and croqui_write_doc to leave a PRD or a diagram behind."
+                "one endpoint or table, croqui_draw for a ready diagram (then croqui_lint), and "
+                "croqui_write_doc to leave a PRD or a hand-written diagram behind."
             ),
         })
     if method in ("notifications/initialized", "notifications/cancelled"):

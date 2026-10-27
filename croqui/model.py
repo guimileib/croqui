@@ -59,7 +59,7 @@ def image_names(layout: dict) -> list[str]:
 
 
 # Node kinds, ordered — the viewer lays them out as columns in this order.
-KIND_ORDER = ("route", "service", "repo", "table", "external")
+KIND_ORDER = ("entry", "route", "module", "service", "repo", "table", "external")
 
 # Edge kinds.
 CALLS = "calls"
@@ -120,8 +120,8 @@ class Graph:
             del self._edges[key]
         return len(dangling)
 
-    def drop_isolated_nodes(self, keep_kinds: tuple[str, ...] = ("route",)) -> int:
-        """Remove nodes with no edges, except routes (``/health`` is still API surface)."""
+    def drop_isolated_nodes(self, keep_kinds: tuple[str, ...] = ("route", "entry")) -> int:
+        """Remove nodes with no edges, except routes (``/health`` is still API surface) and entries."""
         linked: set[str] = set()
         for edge in self._edges.values():
             linked.add(edge["from"])
