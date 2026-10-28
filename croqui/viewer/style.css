@@ -1,14 +1,23 @@
 /* croqui viewer — paper-like canvas, hand-drawn ink, no external assets. */
 
+/* Virgil is Excalidraw's handwriting (SIL OFL 1.1, see fonts/OFL-Virgil.md).
+   Shipped with the viewer — and inlined by `croqui build` — so the hand looks the
+   same on every machine instead of falling back to whatever cursive the OS has. */
+@font-face {
+  font-family: "Virgil";
+  src: url("fonts/Virgil.woff2") format("woff2");
+  font-display: swap;
+}
+
 :root {
-  --paper: #fdfdf8;
-  --paper-grid: #e9e7dc;
-  --ink: #1b1b1f;
-  --ink-soft: #6b6b73;
-  --ink-faint: #a5a5ad;
+  --paper: #fbfbfc;
+  --paper-grid: #e3e3ea;
+  --ink: #1e1e24;
+  --ink-soft: #6b6b76;
+  --ink-faint: #a9a9b4;
   --panel: #ffffff;
-  --panel-edge: #e2e0d6;
-  --shadow: 0 6px 24px rgba(30, 28, 20, 0.12);
+  --panel-edge: #ececf1;
+  --shadow: 0 0 0 1px rgba(24, 24, 40, 0.05), 0 2px 6px rgba(24, 24, 40, 0.05), 0 10px 28px rgba(24, 24, 40, 0.07);
 
   --get: #2f9e44;
   --post: #1971c2;
@@ -20,22 +29,32 @@
   --repo: #0c8599;
   --table: #d9820b;
   --external: #6c757d;
+  --entry: #e64980;
+  --module: #4263eb;
 
-  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-hand: "Segoe Print", "Bradley Hand", "Chalkboard SE", "Comic Sans MS", var(--font);
+  /* croqui's own colour: the light purple of the sphere in the logo. Selection,
+     the active tool and the primary action all speak in it. */
+  --accent: #7c5cf0;
+  --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+  --island-radius: 12px;
+  --hover: color-mix(in srgb, var(--ink) 6%, transparent);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font: var(--font-sans);
+  --font-hand: "Virgil", "Segoe Print", "Bradley Hand", "Chalkboard SE", "Comic Sans MS", var(--font);
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --paper: #15171b;
-    --paper-grid: #23262c;
-    --ink: #e9e7e1;
-    --ink-soft: #9aa0a8;
-    --ink-faint: #5c626b;
-    --panel: #1c1f24;
-    --panel-edge: #2e323a;
-    --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+    --paper: #121316;
+    --paper-grid: #212228;
+    --ink: #ececf1;
+    --ink-soft: #9d9da8;
+    --ink-faint: #5f606a;
+    --panel: #1b1c21;
+    --panel-edge: #2a2b32;
+    --shadow: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 10px 28px rgba(0, 0, 0, 0.5);
     --get: #51cf66;
     --post: #4dabf7;
     --patch: #ff922b;
@@ -46,18 +65,21 @@
     --repo: #3bc9db;
     --table: #ffc078;
     --external: #adb5bd;
+    --entry: #f783ac;
+    --module: #748ffc;
+    --accent: #a996ff;
   }
 }
 
 :root[data-theme="dark"] {
-  --paper: #15171b;
-  --paper-grid: #23262c;
-  --ink: #e9e7e1;
-  --ink-soft: #9aa0a8;
-  --ink-faint: #5c626b;
-  --panel: #1c1f24;
-  --panel-edge: #2e323a;
-  --shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  --paper: #121316;
+  --paper-grid: #212228;
+  --ink: #ececf1;
+  --ink-soft: #9d9da8;
+  --ink-faint: #5f606a;
+  --panel: #1b1c21;
+  --panel-edge: #2a2b32;
+  --shadow: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 10px 28px rgba(0, 0, 0, 0.5);
   --get: #51cf66;
   --post: #4dabf7;
   --patch: #ff922b;
@@ -68,6 +90,9 @@
   --repo: #3bc9db;
   --table: #ffc078;
   --external: #adb5bd;
+  --entry: #f783ac;
+  --module: #748ffc;
+  --accent: #a996ff;
 }
 
 * { box-sizing: border-box; }
@@ -86,47 +111,97 @@ body.hand { --font: var(--font-hand); }
 
 /* ------------------------------------------------------------------ toolbar */
 
+/* Everything that is not the map floats over it in small islands, the way
+   Excalidraw does it: the paper runs edge to edge and the controls take only
+   the room they need. The bar itself is transparent and lets clicks through. */
 #toolbar {
   position: fixed;
-  inset: 0 0 auto 0;
+  top: 12px;
+  left: 12px;
+  right: 12px;
   z-index: 20;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  padding: 10px 14px;
-  background: color-mix(in srgb, var(--paper) 88%, transparent);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--panel-edge);
-  flex-wrap: wrap;
+  pointer-events: none;
+}
+#toolbar > * { pointer-events: auto; }
+
+.island {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--island-radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+#island-left { gap: 6px; padding-right: 6px; }
+#island-right { gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+
+.ibtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 8px;
+}
+.ibtn:hover, .ibtn[aria-expanded="true"] { color: var(--ink); background: var(--hover); }
+.ibtn svg, .pop-item svg, .zbtn svg, .search-ico {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 #brand {
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  margin-right: 2px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px 0 2px;
+}
+#brand .logo { width: 24px; height: 24px; flex: none; }
+#brand .word {
+  font-family: var(--font-hand);
+  font-size: 19px;
+  line-height: 1;
+  color: var(--ink);
 }
 #brand small {
-  font-weight: 400;
-  color: var(--ink-soft);
-  margin-left: 6px;
-  font-size: 12px;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  white-space: nowrap;
 }
 
+#search-box { position: relative; display: flex; align-items: center; }
+.search-ico { position: absolute; left: 9px; width: 15px; height: 15px; color: var(--ink-faint); pointer-events: none; }
 #search {
   font: inherit;
   font-size: 13px;
-  padding: 6px 10px;
-  min-width: 210px;
+  width: 190px;
+  height: 34px;
+  padding: 0 52px 0 30px;
   color: var(--ink);
-  background: var(--panel);
-  border: 1px solid var(--panel-edge);
-  border-radius: 7px;
+  background: var(--hover);
+  border: 1px solid transparent;
+  border-radius: 8px;
   outline: none;
+  transition: width 0.16s, background 0.16s, border-color 0.16s;
 }
-#search:focus { border-color: var(--post); }
-
-#search-box { position: relative; display: flex; align-items: center; }
-#search-box #search { padding-right: 52px; }
+#search::placeholder { color: var(--ink-faint); }
+#search:focus { width: 260px; background: var(--panel); border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 #search-count {
   position: absolute;
   right: 26px;
@@ -138,39 +213,39 @@ body.hand { --font: var(--font-hand); }
 #search-count.none { color: var(--delete); }
 
 .chips { display: flex; gap: 5px; flex-wrap: wrap; }
+.chips[hidden] { display: none; }
 
 .chip {
   font: inherit;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 550;
+  padding: 5px 10px;
   border-radius: 999px;
   cursor: pointer;
   color: var(--ink-soft);
   background: transparent;
-  border: 1.5px solid var(--panel-edge);
+  border: 1px solid var(--panel-edge);
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.chip:hover { border-color: var(--ink-faint); }
+.chip:hover { border-color: var(--ink-faint); color: var(--ink); }
 .chip[aria-pressed="true"] {
   color: #fff;
-  background: var(--chip-color, var(--ink));
-  border-color: var(--chip-color, var(--ink));
+  background: var(--chip-color, var(--accent));
+  border-color: var(--chip-color, var(--accent));
 }
 .chip.ghost[aria-pressed="true"] {
-  color: var(--ink);
-  background: color-mix(in srgb, var(--ink) 12%, transparent);
-  border-color: var(--ink-faint);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
 }
+.chip[hidden], .btn[hidden] { display: none; }
 
 /* How many boxes are ganged up for a group move, and the way out of it. */
 .chip.picked {
-  color: var(--service);
-  border-color: color-mix(in srgb, var(--service) 55%, transparent);
-  background: color-mix(in srgb, var(--service) 12%, transparent);
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
 }
-.chip.picked:hover { border-color: var(--service); }
 
 /* Layout entries pointing at nodes the code no longer has. Loud enough to be
    noticed once, quiet enough not to nag — nothing is broken, only stale. */
@@ -179,23 +254,78 @@ body.hand { --font: var(--font-hand); }
   border-color: color-mix(in srgb, var(--patch) 45%, transparent);
   background: color-mix(in srgb, var(--patch) 10%, transparent);
 }
-.chip.warn:hover { border-color: var(--patch); }
 
 .spacer { flex: 1; }
 
 .btn {
   font: inherit;
   font-size: 12.5px;
-  padding: 6px 11px;
-  border-radius: 7px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
   cursor: pointer;
   color: var(--ink);
-  background: var(--panel);
-  border: 1px solid var(--panel-edge);
+  background: var(--hover);
+  border: 0;
 }
-.btn:hover { border-color: var(--ink-faint); }
-.btn.primary { border-color: var(--post); color: var(--post); font-weight: 600; }
-.btn:disabled { opacity: 0.45; cursor: default; }
+.btn:hover { background: color-mix(in srgb, var(--ink) 10%, transparent); }
+.btn.primary { color: #fff; background: var(--accent); font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.07); }
+.btn:disabled { cursor: default; }
+.btn.primary:disabled { color: var(--ink-faint); background: var(--hover); font-weight: 500; filter: none; }
+
+/* ------------------------------------------------------------------- menus */
+
+.pop {
+  position: fixed;
+  z-index: 50;
+  min-width: 220px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: var(--island-radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+.pop[hidden] { display: none; }
+.pop hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--panel-edge); }
+.pop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  border-radius: 8px;
+}
+.pop-item:hover { background: var(--hover); }
+.pop-item[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+.pop-item.danger { color: var(--delete); }
+.pop-item kbd, #hint kbd {
+  margin-left: auto;
+  font: inherit;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.pop-row { display: flex; align-items: center; gap: 4px; padding: 6px 10px; font-size: 13px; }
+.pop-row span { margin-right: auto; color: var(--ink-soft); }
+.pop-title {
+  padding: 8px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+#filters .chips, .pop-toggles { display: flex; flex-wrap: wrap; gap: 5px; padding: 0 8px 8px; }
+#filters[hidden] { display: none; }
 
 /* ------------------------------------------------------------------- canvas */
 
@@ -230,13 +360,13 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
 .node.marked .fill { fill-opacity: 0.26; }
 .shape.marked { cursor: move; }
 .shape.marked .ink { stroke-width: 3; }
-.shape.marked image { outline: 2px solid var(--post); outline-offset: 2px; }
+.shape.marked image { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* The swept rectangle. Stroke width and dashes are divided by the zoom in JS so
    it stays one pixel on screen, like the shape handles. */
 .marquee {
-  fill: color-mix(in srgb, var(--service) 9%, transparent);
-  stroke: var(--service);
+  fill: color-mix(in srgb, var(--accent) 9%, transparent);
+  stroke: var(--accent);
 }
 
 /* ------------------------------------------------------------- drawings */
@@ -295,13 +425,13 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
 .overlay { pointer-events: none; }
 .selbox {
   fill: none;
-  stroke: var(--post);
+  stroke: var(--accent);
   stroke-dasharray: 4 3;
   opacity: 0.7;
 }
 .handle {
   fill: var(--paper);
-  stroke: var(--post);
+  stroke: var(--accent);
   pointer-events: all;
   cursor: pointer;
 }
@@ -313,11 +443,11 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
 .draft { pointer-events: none; }
 /* An arrow end that is holding on to a box is a filled handle; the box an end
  * would hold on to if let go here is outlined while you drag. */
-.handle.tied { fill: var(--post); }
+.handle.tied { fill: var(--accent); }
 .bindhint {
-  fill: var(--post);
+  fill: var(--accent);
   fill-opacity: 0.1;
-  stroke: var(--post);
+  stroke: var(--accent);
   stroke-dasharray: 4 3;
   pointer-events: none;
 }
@@ -328,34 +458,41 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
 
 /* ------------------------------------------------------ tool rail + inspector */
 
+/* The tools sit in one bar at the top centre, in Excalidraw's order, each with
+   its key in the corner. Shapes croqui adds on top wait behind the ⋯. */
+/* Centred with auto margins, not a transform: a transformed parent would become
+   the frame its fixed-position menus are placed in, and they would open astray. */
 #tools {
   position: fixed;
-  left: 12px;
-  top: 50%;
-  z-index: 15;
-  transform: translateY(-50%);
+  top: 12px;
+  left: 0;
+  right: 0;
+  width: max-content;
+  margin: 0 auto;
+  z-index: 21;
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 2px;
-  padding: 6px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  border: 1px solid var(--panel-edge);
+  padding: 4px;
+  border-radius: var(--island-radius);
+  background: var(--panel);
   box-shadow: var(--shadow);
-  backdrop-filter: blur(8px);
 }
 #tools hr {
-  width: 60%;
-  margin: 3px auto;
+  align-self: stretch;
+  width: 1px;
+  margin: 6px 3px;
   border: 0;
-  border-top: 1px solid var(--panel-edge);
+  background: var(--panel-edge);
 }
+#tools .more { position: relative; display: flex; }
 .tool {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   cursor: pointer;
   color: var(--ink-soft);
@@ -364,40 +501,77 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
   border-radius: 8px;
 }
 .tool svg {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.5;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
-.tool:hover { background: color-mix(in srgb, var(--ink) 8%, transparent); color: var(--ink); }
+.tool:hover { background: var(--hover); color: var(--ink); }
 .tool[aria-pressed="true"] {
-  color: var(--post);
-  background: color-mix(in srgb, var(--post) 15%, transparent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+#lock[aria-pressed="false"] .shackle { transform: translate(2.6px, -1px); }
+/* The key that picks the tool, in the corner — Excalidraw's habit, and the
+   cheapest way to learn the shortcuts without opening a help page. */
+.tool[data-k]::after {
+  content: attr(data-k);
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--ink-faint);
+  text-transform: uppercase;
 }
 
 #inspector {
   position: fixed;
-  left: 60px;
-  top: 50%;
+  left: 12px;
+  top: 64px;
   z-index: 15;
-  transform: translateY(-50%);
-  width: 150px;
+  width: 196px;
+  max-height: calc(100vh - 128px);
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 9px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
-  border: 1px solid var(--panel-edge);
+  gap: 8px;
+  padding: 11px;
+  border-radius: var(--island-radius);
+  background: var(--panel);
   box-shadow: var(--shadow);
-  backdrop-filter: blur(8px);
 }
 #inspector[hidden] { display: none; }
 .ins-row { display: flex; flex-wrap: wrap; gap: 4px; }
-.ins-row[hidden] { display: none; }
+#ins-colors { gap: 3px; }
+.ins-row[hidden], .ins-sec[hidden] { display: none; }
+.ins-sec { display: flex; flex-direction: column; gap: 4px; }
+.ins-title {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+/* A row of mutually exclusive choices, drawn as one control. */
+.ins-row.seg .mini { flex: 1; min-width: 0; padding: 3px 0; text-align: center; }
+.mini.ico svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  margin: 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.mini.font-hand { font-family: var(--font-hand); font-size: 13px; }
+.mini.font-normal { font-family: var(--font-sans); }
+.mini.font-code { font-family: var(--font-mono); }
 .ins-row.hintrow {
   font-size: 10.5px;
   line-height: 1.4;
@@ -405,8 +579,8 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
 }
 
 .swatch {
-  width: 20px;
-  height: 20px;
+  width: 19px;
+  height: 19px;
   padding: 0;
   cursor: pointer;
   border-radius: 6px;
@@ -433,14 +607,13 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
 }
 .mini:hover { border-color: var(--ink-faint); color: var(--ink); }
 .mini[aria-pressed="true"] {
-  color: var(--ink);
-  background: color-mix(in srgb, var(--ink) 11%, transparent);
-  border-color: var(--ink-faint);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
 }
 /* A− / A+ around the current size. The readout sits between them so the pair
  * reads as one control rather than two loose buttons. */
-#ins-size { align-items: center; gap: 6px; }
-#ins-size .mini { padding: 2px 7px; line-height: 1.3; }
+#ins-size .mini { line-height: 1.3; }
 #ins-size .mini sup { font-size: 8px; vertical-align: super; }
 #ins-size-val {
   font-size: 10.5px;
@@ -461,23 +634,27 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
   border-radius: 6px;
   outline: none;
 }
-#ins-label:focus { border-color: var(--post); }
+#ins-label:focus { border-color: var(--accent); }
 
-/* Below the fold on a phone the rail would cover the map; stack it flat. */
-@media (max-height: 560px), (max-width: 620px) {
-  #tools {
-    top: auto;
-    bottom: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    flex-direction: row;
-    flex-wrap: wrap;
-    max-width: calc(100vw - 24px);
-  }
-  #tools hr { width: 1px; height: 20px; margin: 0 3px; border-top: 0; border-left: 1px solid var(--panel-edge); }
-  #inspector { left: 12px; top: auto; bottom: 58px; transform: none; }
-  #toast { bottom: 62px; }
-  #hint { display: none; }
+/* Too narrow for three islands in a row: the tools go to the bottom, where a
+   thumb reaches them, as Excalidraw does on a phone. */
+/* The project line is the first thing to give way: the tools need the middle. */
+@media (max-width: 1640px) {
+  #brand small { display: none; }
+}
+@media (max-width: 1180px) {
+  #tools { top: auto; bottom: 12px; max-width: calc(100vw - 24px); overflow-x: auto; }
+  #zoom { bottom: 64px; }
+  #help-btn { bottom: 64px; }
+  #legend { bottom: 112px; }
+  #toast { bottom: 72px; }
+}
+@media (max-width: 720px) {
+  #brand small, #brand .word { display: none; }
+  #search { width: 120px; }
+  #search:focus { width: 170px; }
+  #legend { display: none; }
+  #inspector { top: auto; bottom: 112px; max-height: 50vh; }
 }
 
 .dimmed { opacity: 0.22; }
@@ -638,17 +815,85 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
 
 /* -------------------------------------------------------------------- misc */
 
+/* Zoom and history, bottom left, where Excalidraw keeps them. The readout is
+   also the fit button, like the one on the UML tab. */
+#zoom {
+  position: fixed;
+  left: 12px;
+  bottom: 12px;
+  z-index: 15;
+  gap: 0;
+}
+#zoom[hidden] { display: none; }
+.zbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  font-size: 15px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 6px;
+  cursor: pointer;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  border-radius: 8px;
+}
+.zbtn.val { font-size: 12px; min-width: 52px; font-variant-numeric: tabular-nums; }
+.zbtn:hover:not(:disabled) { color: var(--ink); background: var(--hover); }
+.zbtn:disabled { opacity: 0.35; cursor: default; }
+.zsep { width: 1px; align-self: stretch; margin: 6px 4px; background: var(--panel-edge); }
+
+#help-btn {
+  position: fixed;
+  right: 12px;
+  bottom: 12px;
+  z-index: 15;
+  width: 40px;
+  height: 40px;
+}
+
+/* The shortcuts, on demand rather than printed over the map. */
 #hint {
   position: fixed;
-  left: 14px;
-  bottom: 12px;
-  z-index: 10;
-  font-size: 11.5px;
-  line-height: 1.6;
-  color: var(--ink-faint);
-  pointer-events: none;
+  right: 12px;
+  bottom: 64px;
+  z-index: 45;
+  width: min(560px, calc(100vw - 24px));
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  padding: 16px 20px 12px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--ink-soft);
+  border-radius: var(--island-radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
 }
-#hint b { color: var(--ink-soft); font-weight: 600; }
+#hint[hidden] { display: none; }
+#hint h3 { margin: 0 0 8px; font-size: 14px; color: var(--ink); }
+#hint dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; }
+#hint dt { font-weight: 600; color: var(--ink); }
+#hint dd { margin: 0; }
+#hint kbd {
+  margin: 0;
+  padding: 1px 6px;
+  font-family: var(--font-sans);
+  color: var(--ink);
+  border-radius: 5px;
+  background: var(--hover);
+}
+#hint .close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  font-size: 18px;
+  color: var(--ink-faint);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
 
 #toast {
   position: fixed;
@@ -671,7 +916,7 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
 /* The map's key: one row per kind of box — colour, name, how many. */
 #legend {
   position: fixed;
-  right: 14px;
+  right: 60px;
   bottom: 12px;
   z-index: 10;
   display: grid;
@@ -680,9 +925,9 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
   padding: 9px 12px;
   font-size: 11.5px;
   color: var(--ink-soft);
-  border: 1px solid var(--panel-edge);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  border-radius: var(--island-radius);
+  background: var(--panel);
+  box-shadow: var(--shadow);
 }
 #legend:empty { display: none; }
 #legend .legend-row { display: flex; align-items: center; gap: 7px; }
@@ -868,13 +1113,20 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
 
 /* The tab strip sits in the toolbar next to the brand: the map is one view of the
    project, the PRD and the diagrams are the others. */
-#tabs { margin-left: 2px; }
+/* A segmented control: one pill sunk into the island, the open tab raised. */
+#tabs { gap: 2px; padding: 2px; border-radius: 9px; background: var(--hover); }
 #tabs[hidden] { display: none; }
-.chip.tab { font-weight: 650; }
+.chip.tab {
+  font-weight: 550;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 7px;
+}
+.chip.tab:hover { color: var(--ink); }
 .chip.tab[aria-selected="true"] {
   color: var(--ink);
-  background: color-mix(in srgb, var(--ink) 12%, transparent);
-  border-color: var(--ink-faint);
+  background: var(--panel);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 .chip.tab small {
   margin-left: 5px;
@@ -890,6 +1142,8 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
 body.reading #tools,
 body.reading #inspector,
 body.reading #hint,
+body.reading #zoom,
+body.reading #filters-btn,
 body.reading #legend,
 body.reading #method-chips,
 body.reading #search-box,
@@ -907,7 +1161,7 @@ body.reading #clear-focus { display: none; }
   top: 0;
   z-index: 4;
   display: flex;
-  padding-top: 58px;
+  padding-top: 62px;
   background: var(--paper);
 }
 #doc[hidden] { display: none; }
@@ -965,8 +1219,11 @@ body.reading #clear-focus { display: none; }
   font-size: 13.5px;
   line-height: 1.62;
 }
-/* A PRD is prose and wants a measure; a diagram wants the whole width. */
-#doc-body.prd { max-width: 82ch; }
+/* A Markdown PRD takes the whole screen, like the HTML one and the diagram:
+   the list of documents is the gallery behind the back button, so a reading
+   view has nothing to share its width with. */
+#doc-body.prd { max-width: none; padding: 28px clamp(24px, 5vw, 72px) 96px; }
+body.reading-prd #doc-list { display: none; }
 #doc-body h4, #doc-body h5, #doc-body h6 {
   margin: 22px 0 7px;
   font-size: 14.5px;
@@ -1110,8 +1367,8 @@ body.space-pan .dg-stage, body.space-pan .dg-stage .dg-node { cursor: grab; }
   pointer-events: none;
 }
 .dg-marquee {
-  fill: color-mix(in srgb, var(--post) 10%, transparent);
-  stroke: var(--post);
+  fill: color-mix(in srgb, var(--accent) 10%, transparent);
+  stroke: var(--accent);
   stroke-dasharray: 4 3;
   pointer-events: none;
 }
@@ -1131,8 +1388,8 @@ body.space-pan .dg-stage, body.space-pan .dg-stage .dg-node { cursor: grab; }
 .diagram-svg.has-focus .dg-node { opacity: 0.25; }
 .diagram-svg.has-focus .dg-node.lit,
 .diagram-svg.has-focus .dg-node.near { opacity: 1; }
-.dg-node.sel > .dg-ink { stroke: var(--post); stroke-width: 2.8; }
-.dg-node.sel .dg-fill { fill: color-mix(in srgb, var(--post) 14%, var(--panel)); }
+.dg-node.sel > .dg-ink { stroke: var(--accent); stroke-width: 2.8; }
+.dg-node.sel .dg-fill { fill: color-mix(in srgb, var(--accent) 14%, var(--panel)); }
 .diagram-svg.staged {
   position: absolute;
   inset: 0;
@@ -1199,7 +1456,7 @@ body.space-pan .dg-stage, body.space-pan .dg-stage .dg-node { cursor: grab; }
 .dg-node.tone-warn { --tone: var(--patch); }
 .dg-node.tone-danger { --tone: var(--delete); }
 .dg-node.tone-muted { --tone: var(--ink-faint); }
-.dg-node.tone-accent { --tone: var(--service); }
+.dg-node.tone-accent { --tone: var(--accent); }
 .dg-node[class*="tone-"] > .dg-ink { stroke: var(--tone); stroke-width: 2; }
 .dg-node[class*="tone-"] .dg-fill { fill: color-mix(in srgb, var(--tone) 13%, var(--panel)); }
 .dg-label { fill: var(--ink); font-weight: 600; }
@@ -1222,3 +1479,21 @@ body.space-pan .dg-stage, body.space-pan .dg-stage .dg-node { cursor: grab; }
   }
   #doc-head, #doc-body { padding-left: 16px; padding-right: 16px; }
 }
+
+/* ------------------------------------------------- hand, eraser, laser */
+
+#canvas.tool-hand, #canvas.tool-hand .node, #canvas.tool-hand .shape { cursor: grab; }
+#canvas.tool-hand.panning, #canvas.tool-hand.panning * { cursor: grabbing; }
+/* A rubber is a circle under the pointer, not an arrow. */
+#canvas.tool-eraser, #canvas.tool-eraser * {
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Ccircle cx='10' cy='10' r='7' fill='white' fill-opacity='.6' stroke='%23555' stroke-width='1.5'/%3E%3C/svg%3E") 10 10, crosshair;
+}
+#canvas.tool-laser, #canvas.tool-laser * { cursor: crosshair; }
+.shape.erasing { opacity: 0.22; }
+.laser { pointer-events: none; }
+.laser-ink { stroke: #ff2d55; stroke-linecap: round; stroke-linejoin: round; }
+.laser-glow { stroke: #ff2d55; stroke-opacity: 0.22; stroke-linecap: round; stroke-linejoin: round; }
+
+/* On a reading tab the search and filters step aside; an island left with
+   nothing in it (a read-only bundle has no save button) goes with them. */
+body.reading #island-right:not(:has(#save:not([hidden]), #orphans:not([hidden]))) { display: none; }

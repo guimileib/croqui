@@ -23,10 +23,12 @@
   "use strict";
 
   var SVG = "http://www.w3.org/2000/svg";
-  var COLS = ["route", "service", "repo", "table", "external"];
+  var COLS = ["entry", "route", "module", "service", "repo", "table", "external"];
   var SIZE = {
     group: [304, 52],
     route: [304, 46],
+    entry: [208, 46],
+    module: [216, 48],
     service: [208, 42],
     repo: [208, 42],
     table: [196, 44],
@@ -46,16 +48,24 @@
   /* Drawing tools. `select` manipulates what is already there; every other tool
    * creates one thing and hands control back to `select`. */
   var TOOLS = [
-    "select", "rect", "ellipse", "diamond", "triangle", "hexagon",
-    "cylinder", "cloud", "arrow", "line", "text", "link",
+    "select", "hand", "rect", "ellipse", "diamond", "triangle", "hexagon",
+    "cylinder", "cloud", "frame", "arrow", "line", "draw", "text", "eraser", "laser", "link",
   ];
+  /* Excalidraw's keys and numbers, so a hand trained there works here: 1–0 run
+   * along the bar in its order. croqui's own extras keep a letter of their own. */
   var TOOL_KEYS = {
-    v: "select", 1: "select", r: "rect", 2: "rect", o: "ellipse", 3: "ellipse",
-    d: "diamond", 4: "diamond", t: "triangle", 5: "triangle", h: "hexagon", 6: "hexagon",
-    c: "cylinder", 7: "cylinder", n: "cloud", 8: "cloud", a: "arrow", 9: "arrow",
-    l: "line", 0: "line", x: "text", e: "link",
+    v: "select", 1: "select", h: "hand", r: "rect", 2: "rect", d: "diamond", 3: "diamond",
+    o: "ellipse", 4: "ellipse", a: "arrow", 5: "arrow", l: "line", 6: "line",
+    p: "draw", 7: "draw", t: "text", x: "text", 8: "text", e: "eraser", 0: "eraser",
+    g: "frame", k: "laser", j: "link", c: "cylinder", n: "cloud",
   };
+  // Tools that make something and then hand control back to `select`, unless
+  // the lock is on — the ones that only act (hand, eraser, laser) stay put.
+  var STAYS = { hand: true, eraser: true, laser: true };
+  // How long the laser's trail lingers, in ms.
+  var LASER_FADE = 650;
   var LINEAR = { arrow: true, line: true };
+  var ARROW_KEYS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
   /* A pasted image is a shape like any other — it moves, resizes, sits behind or in
    * front, and anchors to a node. What it does not have is ink or a text box, so
    * `isTextual` is what the drawing code branches on rather than the type. */
@@ -72,14 +82,21 @@
    * behind rather than faked with the nearest box. */
   var EXCALIDRAW_SHAPES = {
     rectangle: "rect", diamond: "diamond", ellipse: "ellipse",
-    arrow: "arrow", line: "line",
+    arrow: "arrow", line: "line", frame: "frame", magicframe: "frame",
+  };
+  /* The way back: croqui's palette as Excalidraw's own stroke and background
+   * swatches, so a copy pasted there lands in colours it offers. */
+  var EXCALIDRAW_INK = {
+    ink: "#1e1e1e", blue: "#1971c2", green: "#2f9e44", amber: "#f08c00",
+    orange: "#e8590c", red: "#e03131", purple: "#6741d9", teal: "#0c8599",
+  };
+  var EXCALIDRAW_BG = {
+    ink: "#e9ecef", blue: "#a5d8ff", green: "#b2f2bb", amber: "#ffec99",
+    orange: "#ffd8a8", red: "#ffc9c9", purple: "#d0bfff", teal: "#96f2d7",
   };
   // Singular and plural, for saying what stayed behind.
   var EXCALIDRAW_NAMES = {
-    freedraw: ["rabisco", "rabiscos"],
     image: ["imagem", "imagens"],
-    frame: ["moldura", "molduras"],
-    magicframe: ["moldura", "molduras"],
     embeddable: ["embed", "embeds"],
     iframe: ["iframe", "iframes"],
   };
@@ -87,7 +104,7 @@
   var PASTE_TEXT_MAX_W = 640;  // ceiling on that, so wide writing is not a ribbon
   var MAX_PASTE_TEXT = 8000;   // longer than this is a document, not a label
   var DEFAULT_SIZE = {
-    text: [220, 68], arrow: [170, 0], line: [170, 0], cylinder: [150, 110],
+    text: [220, 68], arrow: [170, 0], line: [170, 0], cylinder: [150, 110], frame: [360, 240],
     triangle: [150, 120], cloud: [190, 120],
   };
   var SHAPE_MIN = 22;
@@ -99,12 +116,29 @@
   var SHAPE_WORD = {
     rect: "retângulo", ellipse: "elipse", diamond: "losango", triangle: "triângulo",
     hexagon: "hexágono", cylinder: "cilindro", cloud: "nuvem", text: "texto", image: "imagem",
+    frame: "moldura", draw: "rabisco",
   };
   // Font size of a drawing's text, in scene units. Bounded because past either
   // end the text stops being readable at the zoom you drew it at.
   var TEXT_SIZE = 13;
-  var TEXT_RANGE = [9, 44];
+  // The ceiling is high because dragging a corner scales the writing with the box,
+  // and a heading that has to read from across the map is easily 100px.
+  var TEXT_RANGE = [8, 160];
   var TEXT_STEP = 2;
+  // Excalidraw's S/M/L/XL, on croqui's scale: P is the size the map itself is
+  // written in, so a label made with it sits level with the boxes around it.
+  var TEXT_PRESETS = { P: 13, M: 20, G: 28, GG: 36 };
+  /* Three families, like Excalidraw: handwriting, plain and code. A drawing with
+   * no `font` predates the choice and follows the ✍ toggle, as it always did. */
+  var FONTS = {
+    hand: "var(--font-hand)",
+    normal: "var(--font-sans)",
+    code: "var(--font-mono)",
+  };
+  // Stroke width and sloppiness, as multipliers on the pencil croqui always drew
+  // with — so 2 and 1, the defaults, are exactly the old look.
+  var STROKE = { 1: 0.6, 2: 1, 3: 1.9 };
+  var ROUGH = { 0: 0.2, 1: 1, 2: 2.2 };
   var HANDLES = [
     ["nw", 0, 0], ["n", 0.5, 0], ["ne", 1, 0], ["e", 1, 0.5],
     ["se", 1, 1], ["s", 0.5, 1], ["sw", 0, 1], ["w", 0, 0.5],
@@ -145,7 +179,13 @@
     view: { x: 0, y: 0, k: 1 },
     boxes: {},
     tool: "select",
-    style: { color: "ink", fill: false, dash: false, heads: "end", size: TEXT_SIZE },
+    style: {
+      color: "ink", fill: false, dash: false, heads: "end", size: TEXT_SIZE,
+      font: "hand", align: null, stroke: 2, rough: 1,
+    },
+    // Keep the drawing tool armed after each shape, like Excalidraw's padlock.
+    lock: false,
+    laser: [],
     sel: null,       // {kind:"shape"|"link", id} — the drawing you are editing
     editing: null,   // shape id whose text box has the caret
     linkFrom: null,  // source node while a relation is being drawn
@@ -350,17 +390,18 @@
   }
 
   /** A drawn-by-hand stroke between two points, with heads at neither/one/both. */
-  function sketchArrow(x1, y1, x2, y2, seed, heads) {
+  function sketchArrow(x1, y1, x2, y2, seed, heads, rough) {
+    rough = rough == null ? 1 : rough;
     var dx = x2 - x1, dy = y2 - y1;
     var len = Math.hypot(dx, dy) || 1;
     var nx = -dy / len, ny = dx / len;
-    var bow = (seeded(seed)() - 0.5) * Math.min(15, len * 0.09);
+    var bow = (seeded(seed)() - 0.5) * Math.min(15, len * 0.09) * rough;
     var mx = (x1 + x2) / 2 + nx * bow, my = (y1 + y2) / 2 + ny * bow;
     var d = "";
     for (var p = 0; p < 2; p++) {
       var rand = seeded(seed + p * 977);
-      d += "M" + (x1 + (rand() - 0.5)) + "," + (y1 + (rand() - 0.5)) +
-        "Q" + mx + "," + my + " " + (x2 + (rand() - 0.5)) + "," + (y2 + (rand() - 0.5));
+      d += "M" + (x1 + (rand() - 0.5) * rough) + "," + (y1 + (rand() - 0.5) * rough) +
+        "Q" + mx + "," + my + " " + (x2 + (rand() - 0.5) * rough) + "," + (y2 + (rand() - 0.5) * rough);
     }
     var size = Math.min(10, Math.max(5, len * 0.14));
     if (heads === "end" || heads === "both") d += arrowHead(x2, y2, Math.atan2(y2 - my, x2 - mx), size);
@@ -417,6 +458,79 @@
 
   function isImage(shape) {
     return shape.type === "image";
+  }
+
+  /** Freehand ink: a run of points, with no outline to fill and nothing to write in. */
+  function isPencil(shape) {
+    return shape.type === "draw";
+  }
+
+  /** Everything that carries no text box: arrows, lines, pictures and freehand. */
+  function noText(shape) {
+    return isLinear(shape) || isImage(shape) || isPencil(shape);
+  }
+
+  /* A freehand stroke stores its points as fractions of its own box, so resizing
+   * it is just a new box — the same move as every other drawing — and the file
+   * stays small and diffable instead of holding absolute coordinates. */
+  function pencilPath(s) {
+    var pts = (s.pts || []).map(function (p) { return [p[0] * s.w, p[1] * s.h]; });
+    if (!pts.length) return "";
+    if (pts.length === 1) return "M" + pts[0][0] + "," + pts[0][1] + "l0.01,0";
+    // Quadratics through the midpoints: the jitter of a mouse comes out as a line.
+    var d = "M" + pts[0][0] + "," + pts[0][1];
+    for (var i = 1; i < pts.length - 1; i++) {
+      d += "Q" + pts[i][0] + "," + pts[i][1] + " " +
+        (pts[i][0] + pts[i + 1][0]) / 2 + "," + (pts[i][1] + pts[i + 1][1]) / 2;
+    }
+    var last = pts[pts.length - 1];
+    return d + "L" + last[0] + "," + last[1];
+  }
+
+  /** Where a drawing's text box sits: inside it, or — for a frame — its name above it. */
+  function editorRect(s, w, h) {
+    if (s.type === "frame") {
+      var lh = Math.ceil((s.size || TEXT_SIZE) * 1.35) + 4;
+      return { x: 0, y: -lh - 4, w: Math.max(6, w), h: lh };
+    }
+    var pad = s.type === "text" ? 8 : 11;
+    return { x: pad, y: pad, w: Math.max(6, w - pad * 2), h: Math.max(6, h - pad * 2) };
+  }
+
+  /* --------------------------------------------- the pencil, per drawing */
+
+  function inkWidth(s, base) {
+    return base * (STROKE[s.stroke] || 1);
+  }
+
+  function inkAmp(s, base) {
+    return base * (ROUGH[s.rough] == null ? 1 : ROUGH[s.rough]);
+  }
+
+  /** `dash` was a yes/no before dotted existed; `true` still means dashed. */
+  function dashArray(s) {
+    var w = STROKE[s.stroke] || 1;
+    if (s.dash === "dot") return "0.5 " + Math.round(5 * w + 2);
+    return s.dash ? Math.round(7 * w) + " " + Math.round(5 * w + 1) : null;
+  }
+
+  function fontOf(s) {
+    return FONTS[s.font] || "var(--font)";
+  }
+
+  /* Hachure, the way Excalidraw fills a shape: loose diagonal strokes clipped to
+   * the outline. Drawn with the same wobble as the ink so it reads as pencil,
+   * not as a pattern swatch. Spaced by the stroke, as a thicker pencil hatches
+   * wider. */
+  function hatchPath(w, h, seed, s) {
+    var gap = 7 * (STROKE[s.stroke] || 1) + 2;
+    var rand = seeded(seed + 4099);
+    var amp = inkAmp(s, 0.9);
+    var d = "";
+    for (var c = gap / 2; c < w + h; c += gap) {
+      d += wobble(c, 0, c - h, h, rand, amp);
+    }
+    return d;
   }
 
   /** Can this shape hold writing? Everything that is not a line or an image. */
@@ -746,6 +860,22 @@
     return "var(--" + node.kind + ")";
   }
 
+  // How an entry point is started, said in the box.
+  var ENTRY_HOW = {
+    script: "comando", bin: "comando", main: "main", "main-guard": "__main__",
+    dir: "script", "module-main": "python -m",
+  };
+
+  /** The faint line over a module's name: its language and size. */
+  function moduleLine(m) {
+    var parts = [];
+    var lang = m.lang || (m.langs || []).join("/");
+    if (lang) parts.push(lang);
+    if (m.files) parts.push(m.files + (m.files === 1 ? " arquivo" : " arquivos"));
+    if (m.lines) parts.push(m.lines + " linhas");
+    return parts.join(" · ");
+  }
+
   function columnOf(node) {
     return node.kind === "group" ? "route" : node.kind;
   }
@@ -985,23 +1115,42 @@
       return (a.meta.path || a.label).localeCompare(b.meta.path || b.label);
     });
 
+    // Entry points have no parents to follow; alphabetical is the stable order.
+    buckets.entry.sort(function (a, b) { return a.label.localeCompare(b.label); });
+
+    // Modules import modules, so one column of them would draw every import as a
+    // hook back into itself. They are spread into lanes by import depth instead —
+    // what nothing imports first, what everything leans on last — which reads
+    // left to right the way the API map does.
+    var lanes = [];
+    COLS.forEach(function (kind) {
+      if (kind !== "module" || !buckets.module.length) { lanes.push({ kind: kind, list: buckets[kind] }); return; }
+      var rank = moduleRanks(buckets.module, visible);
+      var deepest = 0;
+      buckets.module.forEach(function (n) { deepest = Math.max(deepest, rank[n.id]); });
+      for (var r = 0; r <= deepest; r++) {
+        lanes.push({ kind: kind, list: buckets.module.filter(function (n) { return rank[n.id] === r; }) });
+      }
+    });
+
     // Later columns follow the barycenter of their parents to cut crossings.
     var indexIn = {};
-    buckets.route.forEach(function (n, i) { indexIn[n.id] = i; });
-    COLS.slice(1).forEach(function (kind) {
-      buckets[kind].sort(function (a, b) {
-        var pa = parentBary(a.id, indexIn, visible);
-        var pb = parentBary(b.id, indexIn, visible);
-        if (pa !== pb) return pa - pb;
-        return a.label.localeCompare(b.label);
-      });
-      buckets[kind].forEach(function (n, i) { indexIn[n.id] = i; });
+    lanes.forEach(function (lane) {
+      if (lane.kind !== "entry" && lane.kind !== "route") {
+        lane.list.sort(function (a, b) {
+          var pa = parentBary(a.id, indexIn, visible);
+          var pb = parentBary(b.id, indexIn, visible);
+          if (pa !== pb) return pa - pb;
+          return a.label.localeCompare(b.label);
+        });
+      }
+      lane.list.forEach(function (n, i) { indexIn[n.id] = i; });
     });
 
     var boxes = {};
     var x = 0;
-    COLS.forEach(function (kind) {
-      var list = buckets[kind];
+    lanes.forEach(function (lane) {
+      var kind = lane.kind, list = lane.list;
       if (!list.length) return;
       var w = SIZE[kind][0];
       var y = 0;
@@ -1024,21 +1173,20 @@
     });
 
     // Vertically centre the short columns against the tallest one.
-    var heights = {};
-    COLS.forEach(function (kind) {
-      var list = buckets[kind];
-      if (!list.length) return;
-      var last = boxes[list[list.length - 1].id];
-      heights[kind] = last.y + last.h;
+    var tallest = 0;
+    lanes.forEach(function (lane) {
+      if (!lane.list.length) return;
+      var last = boxes[lane.list[lane.list.length - 1].id];
+      lane.height = last.y + last.h;
+      tallest = Math.max(tallest, lane.height);
     });
-    var tallest = Math.max.apply(null, [0].concat(Object.keys(heights).map(function (k) { return heights[k]; })));
-    COLS.forEach(function (kind) {
-      if (heights[kind] == null) return;
+    lanes.forEach(function (lane) {
+      if (lane.height == null) return;
       // Rounded: a saved position is an integer, so a half-pixel here would show
       // up as every box in the column nudging on the first save.
-      var shift = Math.round((tallest - heights[kind]) / 2);
+      var shift = Math.round((tallest - lane.height) / 2);
       if (!shift) return;
-      buckets[kind].forEach(function (n) { boxes[n.id].y += shift; });
+      lane.list.forEach(function (n) { boxes[n.id].y += shift; });
     });
 
     // Saved positions always win. Everything above was only needed to decide
@@ -1239,6 +1387,8 @@
    * in the corner rather than written over the columns. */
   var LEGEND = [
     ["route", "endpoints", "linear-gradient(90deg, var(--get) 0 20%, var(--post) 20% 40%, var(--patch) 40% 60%, var(--put) 60% 80%, var(--delete) 80%)"],
+    ["entry", "entradas", "var(--entry)"],
+    ["module", "módulos", "var(--module)"],
     ["service", "serviços", "var(--service)"],
     ["repo", "repositórios", "var(--repo)"],
     ["table", "tabelas", "var(--table)"],
@@ -1308,6 +1458,28 @@
     parts.ink.setAttribute("d", sketchRect(f.x, f.y, f.w, f.h, hashCode("frame:" + h.group), 1.3));
     parts.count.setAttribute("x", f.x + f.w - 12);
     parts.count.setAttribute("y", f.y + 19);
+  }
+
+  /**
+   * Import depth of each module: 0 for one no other module imports, else one past
+   * its deepest importer. An import cycle would never settle, so relaxation stops
+   * after as many passes as there are modules — the cycle lands in some lane
+   * rather than hanging the page.
+   */
+  function moduleRanks(mods, visible) {
+    var rank = {}, isMod = {};
+    mods.forEach(function (n) { rank[n.id] = 0; isMod[n.id] = true; });
+    for (var pass = 0; pass < mods.length; pass++) {
+      var changed = false;
+      mods.forEach(function (n) {
+        (state.vin[n.id] || []).forEach(function (e) {
+          if (e.manual || !isMod[e.from] || e.from === n.id || !visible.has(e.from)) return;
+          if (rank[e.from] + 1 > rank[n.id]) { rank[n.id] = rank[e.from] + 1; changed = true; }
+        });
+      });
+      if (!changed) break;
+    }
+    return rank;
   }
 
   function parentBary(id, indexIn, visible) {
@@ -1458,6 +1630,20 @@
         var p = svgEl("text", { x: 11, y: 35, "font-size": 12.5, fill: "var(--ink)", "font-family": "var(--font-mono)" });
         p.textContent = truncate(node.meta.path || node.label, Math.floor((box.w - 22) / 7.5));
         g.appendChild(p);
+      } else if (node.kind === "entry") {
+        var how = svgEl("text", { class: "title", x: 11, y: 19, "font-size": 10.5, fill: color, "letter-spacing": "0.05em" });
+        how.textContent = "▶ " + (ENTRY_HOW[node.meta.how] || "entrada");
+        g.appendChild(how);
+        var cmd = svgEl("text", { x: 11, y: 35, "font-size": 12.5, fill: "var(--ink)", "font-family": "var(--font-mono)" });
+        cmd.textContent = truncate(node.label, Math.floor((box.w - 22) / 7.5));
+        g.appendChild(cmd);
+      } else if (node.kind === "module") {
+        var where = svgEl("text", { x: 11, y: 17, "font-size": 10, fill: "var(--ink-faint)", "letter-spacing": "0.04em" });
+        where.textContent = truncate(moduleLine(node.meta), Math.floor((box.w - 22) / 5.8));
+        g.appendChild(where);
+        var mn = svgEl("text", { class: "title", x: 11, y: 35, "font-size": 12.5, fill: "var(--ink)" });
+        mn.textContent = truncate(node.label, Math.floor((box.w - 22) / 6.9));
+        g.appendChild(mn);
       } else if (node.kind === "table") {
         var sch = svgEl("text", { x: 11, y: 17, "font-size": 10, fill: "var(--ink-faint)", "letter-spacing": "0.05em" });
         sch.textContent = (node.meta.schema || "public") + (node.meta.object_kind === "matview" ? " · matview" : "");
@@ -1537,33 +1723,65 @@
       return;
     }
 
+    if (isPencil(s)) {
+      var pd = pencilPath(s);
+      refs.hit = svgEl("path", { class: "hit", d: pd, fill: "none", stroke: "transparent", "stroke-width": 16 });
+      refs.ink = svgEl("path", {
+        class: "ink pencil", d: pd, fill: "none", stroke: paint, "stroke-width": inkWidth(s, 2.4),
+        "stroke-linecap": "round", "stroke-linejoin": "round", "stroke-dasharray": dashArray(s),
+      });
+      g.appendChild(refs.hit);
+      g.appendChild(refs.ink);
+      layer.appendChild(g);
+      state.shapeEls[s.id] = refs;
+      return;
+    }
+
     if (isLinear(s)) {
-      var d = sketchArrow(0, 0, s.w, s.h, hashCode(s.id), s.type === "arrow" ? (s.heads || "end") : "none");
+      var d = sketchArrow(0, 0, s.w, s.h, hashCode(s.id), s.type === "arrow" ? (s.heads || "end") : "none",
+        inkAmp(s, 1));
       // A 2px stroke is impossible to grab; a fat invisible twin is not.
       refs.hit = svgEl("path", { class: "hit", d: d, fill: "none", stroke: "transparent", "stroke-width": 16 });
       refs.ink = svgEl("path", {
-        class: "ink", d: d, fill: "none", stroke: paint, "stroke-width": 1.9,
-        "stroke-linecap": "round", "stroke-dasharray": s.dash ? "7 5" : null,
+        class: "ink", d: d, fill: "none", stroke: paint, "stroke-width": inkWidth(s, 1.9),
+        "stroke-linecap": "round", "stroke-dasharray": dashArray(s),
       });
       g.appendChild(refs.hit);
       g.appendChild(refs.ink);
     } else {
-      var outline = shapeOutline(s.type, s.w, s.h, hashCode(s.id), 1.6);
+      // A frame is a container, not a sketch: ruled straight, so what sits in it
+      // is what carries the hand.
+      var outline = shapeOutline(s.type, s.w, s.h, hashCode(s.id), inkAmp(s, s.type === "frame" ? 0.2 : 1.6));
+      var hatched = s.fill === "hachure";
       refs.fill = shapeFillEl(s.type, s.w, s.h);
       refs.fill.setAttribute("class", "fill");
-      refs.fill.setAttribute("fill", s.fill ? paint : "transparent");
-      refs.fill.setAttribute("fill-opacity", s.fill ? 0.13 : 1);
+      refs.fill.setAttribute("fill", s.fill && !hatched ? paint : "transparent");
+      refs.fill.setAttribute("fill-opacity", s.fill && !hatched ? 0.13 : 1);
       // An unfilled shape is grabbed by its ink, like a real pencil drawing;
       // a filled one (or a text box) is grabbed anywhere inside. This is an
       // attribute rather than a style so the drawing-mode CSS can still win.
       refs.fill.setAttribute("pointer-events", s.fill || s.type === "text" ? "all" : "none");
       g.appendChild(refs.fill);
+      if (hatched) {
+        // The clip is the clean fill geometry again, under an id of its own.
+        var clipId = "hk-" + s.id;
+        refs.clip = svgEl("clipPath", { id: clipId });
+        refs.clip.appendChild(shapeFillEl(s.type, s.w, s.h));
+        g.appendChild(refs.clip);
+        refs.hatch = svgEl("path", {
+          class: "hatch", d: hatchPath(s.w, s.h, hashCode(s.id), s), fill: "none", stroke: paint,
+          "stroke-width": inkWidth(s, 1), "stroke-opacity": 0.55, "stroke-linecap": "round",
+          "clip-path": "url(#" + clipId + ")", "pointer-events": "none",
+        });
+        g.appendChild(refs.hatch);
+      }
       refs.hit = svgEl("path", { class: "hit", d: outline, fill: "none", stroke: "transparent", "stroke-width": 14 });
       g.appendChild(refs.hit);
       refs.ink = svgEl("path", {
         class: "ink", d: outline, fill: "none", stroke: paint,
-        "stroke-width": s.type === "text" ? 1.4 : 1.8,
-        "stroke-dasharray": s.dash ? "7 5" : null,
+        "stroke-width": inkWidth(s, s.type === "text" ? 1.4 : 1.8),
+        "stroke-linecap": "round",
+        "stroke-dasharray": dashArray(s),
       });
       // A bare text box shows no frame — until it is empty or selected, when a
       // faint one is the only thing telling you it is there. `quieten` keeps that
@@ -1653,11 +1871,10 @@
   function textEditor(s, box, paint, refs) {
     var pad = s.type === "text" ? 8 : 11;
     var editing = state.editing === s.id;
-    var centred = s.type !== "text";
-    var fo = svgEl("foreignObject", {
-      x: pad, y: pad,
-      width: Math.max(6, box.w - pad * 2), height: Math.max(6, box.h - pad * 2),
-    });
+    // A frame's name reads like a caption, from the left, above the frame.
+    var centred = s.type !== "text" && s.type !== "frame";
+    var at = editorRect(s, box.w, box.h);
+    var fo = svgEl("foreignObject", { x: at.x, y: at.y, width: at.w, height: at.h });
     var ta = document.createElement("textarea");
     ta.value = s.text || "";
     ta.readOnly = !editing;
@@ -1665,16 +1882,24 @@
     if (editing) ta.placeholder = "texto…";
     ta.style.cssText =
       "width:100%;height:100%;border:0;background-color:transparent;resize:none;outline:none;overflow:hidden;" +
-      "font:" + (s.size || TEXT_SIZE) + "px/1.35 var(--font);padding:0;margin:0;" +
-      "text-align:" + (centred ? "center" : "left") + ";" +
+      "font:" + (s.size || TEXT_SIZE) + "px/1.35 " + fontOf(s) + ";padding:0;margin:0;" +
+      "text-align:" + (s.align || (centred ? "center" : "left")) + ";" +
       "color:" + paint + ";pointer-events:" + (editing ? "auto" : "none") + ";" +
       "cursor:text;user-select:" + (editing ? "text" : "none");
 
+    /* A textarea's scrollHeight never drops below its own height, so measuring
+     * the writing means collapsing the box for an instant: at height 0 what is
+     * left in scrollHeight is the text alone. Then the box gets its height back
+     * and the difference goes on top, and the writing sits in the middle of the
+     * shape instead of hanging from its top edge. */
     function centre() {
       if (!centred) return;
       ta.style.paddingTop = "0px";
-      var free = ta.clientHeight - ta.scrollHeight;
-      if (free > 0) ta.style.paddingTop = free / 2 + "px";
+      ta.style.height = "0px";
+      var need = ta.scrollHeight;
+      ta.style.height = "100%";
+      var free = ta.clientHeight - need;
+      if (free > 0) ta.style.paddingTop = Math.floor(free / 2) + "px";
     }
 
     // Typing past the bottom of a text box grows it rather than hiding the text.
@@ -1741,13 +1966,20 @@
       if (refs.ink) refs.ink.setAttribute("d", sketchRect(0, 0, s.w, s.h, hashCode(s.id), 1.2));
       return;
     }
+    if (isPencil(s)) {
+      var pd = pencilPath(s);
+      refs.ink.setAttribute("d", pd);
+      refs.hit.setAttribute("d", pd);
+      return;
+    }
     if (isLinear(s)) {
-      var d = sketchArrow(0, 0, s.w, s.h, hashCode(s.id), s.type === "arrow" ? (s.heads || "end") : "none");
+      var d = sketchArrow(0, 0, s.w, s.h, hashCode(s.id), s.type === "arrow" ? (s.heads || "end") : "none",
+        inkAmp(s, 1));
       refs.ink.setAttribute("d", d);
       refs.hit.setAttribute("d", d);
       return;
     }
-    var outline = shapeOutline(s.type, s.w, s.h, hashCode(s.id), 1.6);
+    var outline = shapeOutline(s.type, s.w, s.h, hashCode(s.id), inkAmp(s, s.type === "frame" ? 0.2 : 1.6));
     refs.ink.setAttribute("d", outline);
     refs.hit.setAttribute("d", outline);
     var fresh = shapeFillEl(s.type, s.w, s.h);
@@ -1755,10 +1987,17 @@
       var attr = fresh.attributes[i];
       if (attr.name !== "class") refs.fill.setAttribute(attr.name, attr.value);
     }
+    if (refs.hatch) {
+      refs.clip.replaceChild(shapeFillEl(s.type, s.w, s.h), refs.clip.firstChild);
+      refs.hatch.setAttribute("d", hatchPath(s.w, s.h, hashCode(s.id), s));
+    }
     if (refs.editor) {
-      var pad = s.type === "text" ? 8 : 11;
-      refs.editor.fo.setAttribute("width", Math.max(6, s.w - pad * 2));
-      refs.editor.fo.setAttribute("height", Math.max(6, s.h - pad * 2));
+      var at = editorRect(s, s.w, s.h);
+      refs.editor.fo.setAttribute("y", at.y);
+      refs.editor.fo.setAttribute("width", at.w);
+      refs.editor.fo.setAttribute("height", at.h);
+      // A corner drag scales the writing with the box, live.
+      refs.editor.ta.style.fontSize = (s.size || TEXT_SIZE) + "px";
       refs.editor.centre();
     }
   }
@@ -1771,8 +2010,8 @@
     var g = svgEl("g", { class: "link" + (picked ? " picked" : ""), "data-link": e.id });
     var hit = svgEl("path", { class: "hit", d: geo.d, fill: "none", stroke: "transparent", "stroke-width": 16 });
     var path = svgEl("path", {
-      class: "ink", d: geo.d, fill: "none", stroke: paint, "stroke-width": 1.7,
-      "stroke-linecap": "round", "stroke-dasharray": e.dash ? "7 5" : null,
+      class: "ink", d: geo.d, fill: "none", stroke: paint, "stroke-width": inkWidth(e, 1.7),
+      "stroke-linecap": "round", "stroke-dasharray": dashArray(e),
     });
     g.appendChild(hit);
     g.appendChild(path);
@@ -1858,9 +2097,15 @@
       // The pencil in the rail is the default; a paste brings its own styling and
       // says so element by element.
       color: opts.color || state.style.color,
-      fill: opts.fill == null ? state.style.fill : !!opts.fill,
-      dash: opts.dash == null ? state.style.dash : !!opts.dash,
+      // `fill` is true (a tint) or "hachure"; `dash` is true (dashed) or "dot".
+      fill: opts.fill == null ? state.style.fill : opts.fill,
+      dash: opts.dash == null ? state.style.dash : opts.dash,
+      stroke: opts.stroke || state.style.stroke,
+      rough: opts.rough == null ? state.style.rough : opts.rough,
     };
+    // The defaults are left out of the file, so a plain drawing reads as it did.
+    if (s.stroke === 2) delete s.stroke;
+    if (s.rough === 1) delete s.rough;
     if (isLinear(s)) {
       s.heads = opts.heads || (type === "arrow" ? state.style.heads : "none");
       delete s.fill;
@@ -1871,11 +2116,32 @@
       delete s.fill;
       delete s.color;
       delete s.dash;
+      delete s.stroke;
+      delete s.rough;
       s.src = opts.src;
       if (opts.alt) s.alt = opts.alt;
+    } else if (isPencil(s)) {
+      delete s.fill;
+      delete s.text;
+      s.pts = opts.pts || [];
     } else {
       s.size = opts.size || state.style.size;
+      s.font = opts.font || state.style.font;
+      var align = opts.align || state.style.align;
+      if (align) s.align = align;
       if (opts.text) s.text = opts.text;
+      // A frame is named like Excalidraw's, in plain letters a size down.
+      if (type === "frame") {
+        if (!opts.text) s.text = "moldura";
+        if (!opts.font) s.font = "normal";
+        if (!opts.size) s.size = 12;
+      }
+    }
+    // A copy brings fields addShape has no argument for (a stroke's points, …).
+    if (opts.keep) {
+      Object.keys(opts.keep).forEach(function (k) {
+        if (["id", "x", "y", "w", "h", "anchor", "from", "to"].indexOf(k) < 0) s[k] = opts.keep[k];
+      });
     }
     if (opts.front) s.front = true;
     // A drawing dropped on a node is about that node, so it travels with it —
@@ -1887,7 +2153,8 @@
     if (host) anchorTo(s, host);
     shapes().push(s);
     if (opts.batch) return s;
-    state.sel = { kind: "shape", id: s.id };
+    // With the lock on you are drawing a series: nothing gets picked up between them.
+    state.sel = state.lock && !opts.edit && state.tool !== "select" ? null : { kind: "shape", id: s.id };
     state.editing = opts.edit ? s.id : null;
     markDirty();
     render();
@@ -1966,6 +2233,43 @@
     markDirty();
     render();
     refreshInspector();
+  }
+
+  /** Ctrl+D: the selected drawing again, a step down and to the right, selected. */
+  function duplicateSelection() {
+    var s = selectedShape();
+    if (!s) return;
+    pushHistory();
+    var copy = JSON.parse(JSON.stringify(s));
+    copy.id = "sh-" + Date.now().toString(36) + "-" + state.seq++;
+    copy.x += 16;
+    copy.y += 16;
+    // The copy's ends are where they were drawn, not on the boxes the original holds.
+    delete copy.from;
+    delete copy.to;
+    shapes().push(copy);
+    if (copy.anchor) reanchor(copy);
+    state.sel = { kind: "shape", id: copy.id };
+    state.editing = null;
+    markDirty();
+    render();
+    refreshInspector();
+  }
+
+  /** Arrow keys nudge the selected drawing — 1 unit, or a grid square with Shift. */
+  function nudgeSelection(dx, dy) {
+    var s = selectedShape();
+    if (!s) return false;
+    pushHistory();
+    s.x += dx;
+    s.y += dy;
+    if (isLinear(s)) { delete s.from; delete s.to; }
+    reanchor(s);
+    applyShapeGeometry(s);
+    if (!isLinear(s)) followEnds(keyed({ shape: s.id }));
+    markDirty();
+    renderOverlay();
+    return true;
   }
 
   function pick(kind, id) {
@@ -2359,9 +2663,21 @@
       "translate(" + state.view.x + "," + state.view.y + ") scale(" + state.view.k + ")"
     );
     paintPaper();
+    if (el.zoomVal) el.zoomVal.textContent = Math.round(state.view.k * 100) + "%";
     // Handles are drawn in scene units but must stay one size on screen.
     renderOverlay();
     rememberView();
+  }
+
+  /** Zoom about the middle of the screen — the − / + buttons and keys. */
+  function zoomBy(factor) {
+    var rect = el.canvas.getBoundingClientRect();
+    var mx = rect.width / 2, my = rect.height / 2;
+    var k = Math.min(3, Math.max(0.12, state.view.k * factor));
+    state.view.x = mx - (mx - state.view.x) * (k / state.view.k);
+    state.view.y = my - (my - state.view.y) * (k / state.view.k);
+    state.view.k = k;
+    applyView();
   }
 
   /**
@@ -2946,7 +3262,7 @@
 
       // 0. Space held (or the middle button) is the hand: it pans from anywhere,
       // even starting on a box, the way Excalidraw's does.
-      if (state.spaceDown || ev.button === 1) {
+      if (state.spaceDown || ev.button === 1 || state.tool === "hand") {
         ev.preventDefault();
         drag = { kind: "pan", sx: ev.clientX, sy: ev.clientY, ox: state.view.x, oy: state.view.y, moved: false };
         el.canvas.classList.add("panning");
@@ -2959,13 +3275,27 @@
       if (handle && sel) {
         drag = {
           kind: "resize", handle: handle, ref: sel, pre: snapshot(), moved: false,
-          start: { x: sel.x, y: sel.y, w: sel.w, h: sel.h },
+          start: { x: sel.x, y: sel.y, w: sel.w, h: sel.h, size: sel.size || TEXT_SIZE },
         };
         el.canvas.classList.add("dragging");
         return;
       }
 
       // 2. A drawing tool takes the canvas over completely.
+      if (state.tool === "draw") {
+        drag = { kind: "pencil", pts: [[pos.x, pos.y]], moved: false };
+        return;
+      }
+      if (state.tool === "eraser") {
+        drag = { kind: "erase", gone: {}, last: pos };
+        eraseAt(drag, pos);
+        return;
+      }
+      if (state.tool === "laser") {
+        drag = { kind: "laser" };
+        laserAt(pos);
+        return;
+      }
       if (state.tool === "link") { drag = startLink(ev); return; }
       if (state.tool !== "select") {
         drag = { kind: "draw", type: state.tool, sx: pos.x, sy: pos.y, ex: pos.x, ey: pos.y, moved: false };
@@ -3101,6 +3431,18 @@
         applyView();
         return;
       }
+      if (drag.kind === "pencil") {
+        var tip = drag.pts[drag.pts.length - 1];
+        // Two screen pixels apart: finer is noise, coarser shows the polygon.
+        if (Math.hypot(pos.x - tip[0], pos.y - tip[1]) * state.view.k > 2) {
+          drag.pts.push([pos.x, pos.y]);
+          drag.moved = true;
+          pencilPreview(drag);
+        }
+        return;
+      }
+      if (drag.kind === "erase") { eraseAt(drag, pos); return; }
+      if (drag.kind === "laser") { laserAt(pos); return; }
       if (drag.kind === "draw") {
         drag.ex = pos.x;
         drag.ey = pos.y;
@@ -3166,6 +3508,9 @@
       drag = null;
 
       if (done.kind === "draw") { commitDraw(done, ev); return; }
+      if (done.kind === "pencil") { commitPencil(done); return; }
+      if (done.kind === "erase") { commitErase(done); return; }
+      if (done.kind === "laser") return;
       if (done.kind === "linking") { finishLink(done, ev); return; }
       if (done.kind === "marquee") { commitMarquee(done); return; }
       if (done.kind === "node" && !done.moved && done.frame) {
@@ -3221,7 +3566,7 @@
       if (sg) {
         var id = sg.getAttribute("data-shape");
         var shape = findBy(shapes(), id);
-        if (shape && !isLinear(shape)) {
+        if (shape && !noText(shape)) {
           state.sel = { kind: "shape", id: id };
           state.editing = id;
           render();
@@ -3519,7 +3864,43 @@
     var found = { items: [], skipped: {} };
     function skip(kind) { found.skipped[kind] = (found.skipped[kind] || 0) + 1; }
 
+    // A copy that came out of croqui carries each drawing whole; its labels then
+    // travel inside it, so the separate text elements made for Excalidraw stay out.
+    var carried = live.some(function (elm) { return elm.customData && elm.customData.croqui; });
+
     live.forEach(function (elm) {
+      var own = elm.customData && elm.customData.croqui;
+      if (own && typeof own === "object" && typeof own.type === "string") {
+        found.items.push({
+          type: own.type, x: finiteNum(elm.x), y: finiteNum(elm.y),
+          w: finiteNum(own.w), h: finiteNum(own.h), src: elm.id, keep: own,
+          text: own.text || "", size: own.size, color: own.color,
+        });
+        return;
+      }
+      if (carried && elm.customData && elm.customData.croquiLabel) return;
+      if (elm.type === "freedraw") {
+        var raw = Array.isArray(elm.points) ? elm.points.filter(function (q) {
+          return Array.isArray(q) && isFinite(q[0]) && isFinite(q[1]);
+        }) : [];
+        if (raw.length < 2) { skip("freedraw"); return; }
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        raw.forEach(function (q) {
+          minX = Math.min(minX, q[0]); minY = Math.min(minY, q[1]);
+          maxX = Math.max(maxX, q[0]); maxY = Math.max(maxY, q[1]);
+        });
+        var fw = Math.max(1, maxX - minX), fh = Math.max(1, maxY - minY);
+        found.items.push({
+          type: "draw", x: finiteNum(elm.x) + minX, y: finiteNum(elm.y) + minY, w: fw, h: fh,
+          src: elm.id, color: nearestColor(elm.strokeColor),
+          stroke: excalidrawStroke(elm.strokeWidth),
+          dash: elm.strokeStyle === "dotted" ? "dot" : elm.strokeStyle === "dashed",
+          keep: { pts: raw.map(function (q) {
+            return [Math.round((q[0] - minX) / fw * 1e4) / 1e4, Math.round((q[1] - minY) / fh * 1e4) / 1e4];
+          }) },
+        });
+        return;
+      }
       if (elm.type === "text") {
         // Already carried by the box it labels.
         if (elm.containerId && labels[elm.containerId] === elm) return;
@@ -3533,6 +3914,7 @@
           w: finiteNum(elm.width), h: finiteNum(elm.height),
           size: finiteNum(elm.fontSize),
           color: nearestColor(elm.strokeColor),
+          font: excalidrawFont(elm.fontFamily), align: excalidrawAlign(elm.textAlign),
         });
         return;
       }
@@ -3566,17 +3948,40 @@
       } : null;
       found.items.push({
         type: type, x: span.x, y: span.y, w: span.w, h: span.h, src: elm.id, tie: tie,
-        text: label ? elementText(label) : "",
+        text: label ? elementText(label) : (type === "frame" ? String(elm.name || "moldura") : ""),
         size: label ? finiteNum(label.fontSize) : 0,
+        font: label ? excalidrawFont(label.fontFamily) : null,
+        align: label ? excalidrawAlign(label.textAlign) : null,
         color: nearestColor(elm.strokeColor),
-        // `fillStyle` says hachure, cross-hatch or solid; croqui has one fill, so
-        // what matters is only whether there is a background at all.
-        fill: !!(elm.backgroundColor && elm.backgroundColor !== "transparent"),
-        dash: elm.strokeStyle === "dashed" || elm.strokeStyle === "dotted",
+        // Solid is croqui's tint; hachure, cross-hatch and zigzag all come out as
+        // croqui's one hatching — the point is the texture, not which one.
+        fill: !(elm.backgroundColor && elm.backgroundColor !== "transparent") ? false
+          : (elm.fillStyle && elm.fillStyle !== "solid" ? "hachure" : true),
+        dash: elm.strokeStyle === "dotted" ? "dot" : elm.strokeStyle === "dashed",
+        stroke: excalidrawStroke(elm.strokeWidth),
+        rough: elm.roughness === 0 || elm.roughness === 2 ? elm.roughness : 1,
         heads: LINEAR[type] ? headsFor(elm) : null,
       });
     });
     return found;
+  }
+
+  /* Excalidraw numbers its fonts: 1 Virgil and 5 Excalifont are the hand, 3
+   * Cascadia and 8 Comic Shanns the code; everything else is a plain sans. */
+  function excalidrawFont(n) {
+    if (n === 1 || n === 5) return "hand";
+    if (n === 3 || n === 8) return "code";
+    return n ? "normal" : null;
+  }
+
+  function excalidrawAlign(a) {
+    return a === "left" || a === "center" || a === "right" ? a : null;
+  }
+
+  // Its widths are 1, 2 and 4 — thin, bold, extra bold.
+  function excalidrawStroke(w) {
+    w = finiteNum(w);
+    return w >= 3 ? 3 : w > 0 && w < 1.5 ? 1 : 2;
   }
 
   /** Everything written in a copy, in reading order — what a caret wants from it. */
@@ -3602,7 +4007,7 @@
    * Measured with the map's own font in a canvas, because a box born two lines short
    * hides the tail of the writing: the textarea only grows while you type in it.
    */
-  function textBox(text, size, maxW) {
+  function textBox(text, size, maxW, font) {
     var pad = 18;             // the 8px inset of a text box, on both sides
     var lineH = size * 1.35;  // the textarea's own line-height
     if (!measureCtx) {
@@ -3610,7 +4015,12 @@
       measureCtx = probe.getContext ? probe.getContext("2d") : null;
     }
     var family = "sans-serif";
-    try { family = getComputedStyle(document.body).fontFamily || family; } catch (err) { /* jsdom */ }
+    try {
+      var css = getComputedStyle(document.body);
+      var named = FONTS[font || state.style.font];
+      // A canvas cannot read `var(--…)`, so the family is looked up by its name.
+      family = (named && css.getPropertyValue(named.slice(4, -1)).trim()) || css.fontFamily || family;
+    } catch (err) { /* jsdom */ }
     if (measureCtx) measureCtx.font = size + "px " + family;
     function widthOf(s) {
       if (measureCtx && measureCtx.measureText) return measureCtx.measureText(s).width;
@@ -3663,12 +4073,13 @@
       var out = {
         type: it.type, text: it.text || "", x: it.x, y: it.y, w: it.w, h: it.h,
         color: it.color, fill: it.fill, dash: it.dash, heads: it.heads,
+        font: it.font, align: it.align, stroke: it.stroke, rough: it.rough, keep: it.keep,
         size: pastedTextSize(it.size), src: it.src, tie: it.tie,
         data: it.data, mime: it.mime,
       };
-      if (it.type === "text") {
+      if (it.type === "text" && !it.keep) {
         var wrap = Math.min(PASTE_TEXT_MAX_W, Math.max(PASTE_TEXT_W, it.w || 0));
-        var fit = textBox(it.text, out.size, wrap);
+        var fit = textBox(it.text, out.size, wrap, out.font);
         out.w = fit.w;
         out.h = fit.h;
       }
@@ -3689,6 +4100,7 @@
       return addShape(p.type, p.x + dx, p.y + dy, p.w, p.h, {
         batch: true, text: p.text, size: p.size,
         color: p.color, fill: p.fill, dash: p.dash, heads: p.heads,
+        font: p.font, align: p.align, stroke: p.stroke, rough: p.rough, keep: p.keep, pts: p.keep && p.keep.pts,
       });
     });
     // Excalidraw arrows that held on to a box hold on to the copy of that box —
@@ -3886,6 +4298,144 @@
     renderOverlay();
   }
 
+  /* ------------------------------------------------- freehand, eraser, laser */
+
+  function pencilPreview(d) {
+    var probe = { type: "draw", stroke: state.style.stroke, dash: state.style.dash };
+    var path = "M" + d.pts.map(function (p) { return p[0] + "," + p[1]; }).join("L");
+    var g = svgEl("g", { class: "draft" });
+    g.appendChild(svgEl("path", {
+      d: path, fill: "none", stroke: paintOf(state.style.color), "stroke-width": inkWidth(probe, 2.4),
+      "stroke-linecap": "round", "stroke-linejoin": "round", opacity: 0.9,
+    }));
+    state.draft = g;
+    renderOverlay();
+  }
+
+  /** The stroke becomes a drawing whose box is its own extent. */
+  function commitPencil(d) {
+    state.draft = null;
+    var pts = d.pts.length > 1 ? d.pts : [d.pts[0], [d.pts[0][0] + 0.5, d.pts[0][1] + 0.5]];
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    pts.forEach(function (p) {
+      minX = Math.min(minX, p[0]); minY = Math.min(minY, p[1]);
+      maxX = Math.max(maxX, p[0]); maxY = Math.max(maxY, p[1]);
+    });
+    var w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY);
+    var norm = pts.map(function (p) {
+      return [Math.round((p[0] - minX) / w * 1e4) / 1e4, Math.round((p[1] - minY) / h * 1e4) / 1e4];
+    });
+    if (!state.lock) setTool("select");
+    addShape("draw", minX, minY, w, h, { pts: norm });
+  }
+
+  function distToSegment(px, py, ax, ay, bx, by) {
+    var dx = bx - ax, dy = by - ay;
+    var len = dx * dx + dy * dy;
+    var t = len ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len)) : 0;
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+
+  /**
+   * Is the scene point on this drawing's ink? The eraser asks geometry rather
+   * than the DOM: an unfilled shape is only touched on its outline, as with a
+   * real rubber, while a filled one, a picture or writing is touched anywhere.
+   */
+  function touches(s, x, y, tol) {
+    if (isLinear(s)) return distToSegment(x, y, s.x, s.y, s.x + s.w, s.y + s.h) <= tol + 2;
+    if (isPencil(s)) {
+      var pts = (s.pts || []).map(function (p) { return [s.x + p[0] * s.w, s.y + p[1] * s.h]; });
+      for (var i = 0; i < pts.length; i++) {
+        var b = pts[i + 1] || pts[i];
+        if (distToSegment(x, y, pts[i][0], pts[i][1], b[0], b[1]) <= tol + 2) return true;
+      }
+      return false;
+    }
+    var inside = x >= s.x - tol && x <= s.x + s.w + tol && y >= s.y - tol && y <= s.y + s.h + tol;
+    if (!inside) return false;
+    if (s.fill || isImage(s) || s.type === "text" || (s.text && s.type !== "frame")) return true;
+    var edge = Math.min(x - s.x, s.x + s.w - x, y - s.y, s.y + s.h - y);
+    return Math.abs(edge) <= tol + 3;
+  }
+
+  /** Mark every drawing the rubber passes over, sampling the gap since the last event. */
+  function eraseAt(d, pos) {
+    var tol = 6 / (state.view.k || 1);
+    var steps = Math.max(1, Math.ceil(Math.hypot(pos.x - d.last.x, pos.y - d.last.y) / tol));
+    // Front first: the rubber takes what you see, and what is in front is what you see.
+    var order = shapes().filter(function (s) { return s.front; }).reverse()
+      .concat(shapes().filter(function (s) { return !s.front; }).reverse());
+    for (var i = 1; i <= steps; i++) {
+      var x = d.last.x + (pos.x - d.last.x) * i / steps, y = d.last.y + (pos.y - d.last.y) * i / steps;
+      order.forEach(function (s) {
+        if (d.gone[s.id] || !touches(s, x, y, tol)) return;
+        d.gone[s.id] = true;
+        var refs = state.shapeEls[s.id];
+        if (refs) refs.g.classList.add("erasing");
+      });
+    }
+    d.last = pos;
+  }
+
+  /** Letting go of the rubber deletes what it faded — one undo step for the stroke. */
+  function commitErase(d) {
+    var ids = Object.keys(d.gone);
+    if (!ids.length) return;
+    pushHistory();
+    ids.forEach(function (id) {
+      releaseEndsOn(id);
+      var list = shapes();
+      var i = list.findIndex(function (it) { return it.id === id; });
+      if (i >= 0) list.splice(i, 1);
+      if (state.sel && state.sel.id === id) state.sel = null;
+    });
+    state.editing = null;
+    markDirty();
+    render();
+    refreshInspector();
+  }
+
+  /* The laser is for pointing while you talk over a shared screen: a red trail
+   * that follows the pointer and fades on its own. Nothing about it is saved. */
+  function laserAt(pos) {
+    state.laser.push({ x: pos.x, y: pos.y, t: Date.now() });
+    if (!state.laserRaf) state.laserRaf = requestAnimationFrame(laserTick);
+  }
+
+  function laserTick() {
+    var now = Date.now();
+    state.laser = state.laser.filter(function (p) { return now - p.t < LASER_FADE; });
+    if (!el.laser) {
+      el.laser = svgEl("g", { class: "laser" });
+      el.laserGlow = svgEl("path", { class: "laser-glow", fill: "none" });
+      el.laserInk = svgEl("path", { class: "laser-ink", fill: "none" });
+      el.laser.appendChild(el.laserGlow);
+      el.laser.appendChild(el.laserInk);
+    }
+    // A full render rebuilds the scene; the trail just climbs back on top.
+    if (el.laser.parentNode !== el.scene || el.scene.lastChild !== el.laser) el.scene.appendChild(el.laser);
+    var k = state.view.k || 1;
+    var d = state.laser.length
+      ? "M" + state.laser.map(function (p) { return p.x + "," + p.y; }).join("L")
+      : "";
+    el.laserInk.setAttribute("d", d);
+    el.laserGlow.setAttribute("d", d);
+    el.laserInk.setAttribute("stroke-width", 3 / k);
+    el.laserGlow.setAttribute("stroke-width", 10 / k);
+    state.laserRaf = state.laser.length ? requestAnimationFrame(laserTick) : 0;
+  }
+
+  /** The image tool is an action, as in Excalidraw: pick a file, it lands in view. */
+  function pickImage() {
+    if (!el.imageInput) return;
+    if (!state.canSave) {
+      toast("este é um croqui.html só de leitura — abra com croqui serve para inserir imagens");
+      return;
+    }
+    el.imageInput.value = "";
+    el.imageInput.click();
+  }
+
   /** A drag sets the size; a plain click drops one at a comfortable default. */
   function commitDraw(d, ev) {
     state.draft = null;
@@ -3900,7 +4450,7 @@
       b.w = Math.max(SHAPE_MIN, b.w);
       b.h = Math.max(SHAPE_MIN, b.h);
     }
-    setTool("select");
+    if (!state.lock) setTool("select");
     addShape(d.type, b.x, b.y, b.w, b.h, {
       edit: d.type === "text",
       // Ctrl while letting go keeps the arrow free of whatever it was drawn over.
@@ -3938,6 +4488,14 @@
       s.y = Math.round(top);
       s.w = Math.round(right - left);
       s.h = Math.round(bottom - top);
+      // A corner scales the writing with the box — growing the square grows the
+      // letters, in px, the way Excalidraw scales text. A side only reshapes it,
+      // which is how you change where a text box wraps without touching its size.
+      if (d.handle.length === 2 && !noText(s)) {
+        var ratio = Math.sqrt((s.w / st.w) * (s.h / st.h));
+        s.size = Math.max(TEXT_RANGE[0], Math.min(TEXT_RANGE[1], Math.round(st.size * ratio)));
+        if (el.insSizeVal) el.insSizeVal.textContent = s.size + "px";
+      }
     }
     // A north or west handle moves the origin, so the offset has to follow.
     reanchor(s);
@@ -3992,6 +4550,7 @@
   }
 
   function setTool(tool) {
+    if (tool === "image") { pickImage(); return; }
     tool = TOOLS.indexOf(tool) >= 0 ? tool : "select";
     state.tool = tool;
     if (tool !== "link") state.linkFrom = null;
@@ -4005,12 +4564,30 @@
         b.setAttribute("aria-pressed", String(b.getAttribute("data-tool") === tool));
       });
     }
-    el.canvas.classList.toggle("drawing", tool !== "select" && tool !== "link");
+    el.canvas.classList.toggle("drawing", tool !== "select" && tool !== "link" && !STAYS[tool]);
     el.canvas.classList.toggle("linking", tool === "link");
+    ["hand", "eraser", "laser"].forEach(function (t) { el.canvas.classList.toggle("tool-" + t, tool === t); });
+    syncMoreButton(tool);
     if (hadSel && !state.sel) render();
     else renderOverlay();
     refreshInspector();
     if (tool === "link") toast("clique na origem, depois no destino");
+  }
+
+  /** The ⋯ button wears the icon of the tool it is hiding, while that tool is armed. */
+  function syncMoreButton(tool) {
+    var btn = document.getElementById("more-btn");
+    if (!btn) return;
+    if (!btn.__dots) btn.__dots = btn.innerHTML;
+    var item = document.querySelector('#more [data-tool="' + tool + '"]');
+    btn.innerHTML = item ? item.querySelector("svg").outerHTML : btn.__dots;
+    btn.setAttribute("aria-pressed", String(!!item));
+  }
+
+  function setLock(on) {
+    state.lock = !!on;
+    var b = document.getElementById("lock");
+    if (b) b.setAttribute("aria-pressed", String(state.lock));
   }
 
   /* ------------------------------------------------------------- inspector */
@@ -4037,23 +4614,34 @@
     var kind = l ? "link" : (s ? s.type : state.tool);
     var linear = kind === "arrow" || kind === "line";
     var picture = !!s && isImage(s);
+    var pencil = kind === "draw";
     var style = target || state.style;
 
     // A picture has no stroke, no fill and no letters — offering the palette would
     // be offering a control that does nothing.
-    show(el.insColors, !picture);
+    show(el.insColorsSec, !picture);
     Array.prototype.forEach.call(el.insColors.children, function (b) {
       press(b, b.getAttribute("data-color") === (style.color || "ink"));
     });
-    var writable = !linear && kind !== "link" && !picture;
+    var writable = !linear && kind !== "link" && !picture && !pencil && kind !== "eraser" &&
+      kind !== "hand" && kind !== "laser";
+    var size = s ? (s.size || TEXT_SIZE) : state.style.size;
     show(el.insSize, writable);
-    if (writable && el.insSizeVal) {
-      el.insSizeVal.textContent = (s ? (s.size || TEXT_SIZE) : state.style.size) + "px";
-    }
-    show(el.insFill, writable);
-    press(el.insFill && el.insFill.firstElementChild, style.fill);
+    if (writable && el.insSizeVal) el.insSizeVal.textContent = size + "px";
+    Array.prototype.forEach.call(el.insSize.querySelectorAll("[data-preset]"), function (b) {
+      press(b, TEXT_PRESETS[b.getAttribute("data-preset")] === size);
+    });
+    show(el.insFill, writable && kind !== "frame");
+    show(el.insFont, writable);
+    show(el.insAlign, writable);
+    show(el.insStroke, !picture);
     show(el.insDashRow, !picture);
-    press(el.insDash, style.dash);
+    // A relation is drawn by its own curve, which has no sloppiness to set.
+    show(el.insRough, !picture && kind !== "link");
+    Array.prototype.forEach.call(el.inspector.querySelectorAll("[data-set]"), function (b) {
+      var kv = parseSet(b.getAttribute("data-set"));
+      press(b, styleValue(style, kv.key, kind) === kv.value);
+    });
     show(el.insHeads, !picture && (kind === "arrow" || kind === "link"));
     Array.prototype.forEach.call(el.insHeads ? el.insHeads.children : [], function (b) {
       if (b.hasAttribute("data-heads")) press(b, b.getAttribute("data-heads") === (style.heads || "end"));
@@ -4088,6 +4676,24 @@
     show(el.insHint, !target);
   }
 
+  /** `"fill:hachure"` → {key: "fill", value: "hachure"}, with true/false/numbers typed. */
+  function parseSet(spec) {
+    var at = spec.indexOf(":");
+    var key = spec.slice(0, at), raw = spec.slice(at + 1);
+    var value = raw === "true" ? true : raw === "false" ? false : /^\d+$/.test(raw) ? +raw : raw;
+    return { key: key, value: value };
+  }
+
+  /** What a drawing's style says for `key`, with the default it is drawn with filled in. */
+  function styleValue(style, key, kind) {
+    var v = style[key];
+    if (key === "fill" || key === "dash") return v || false;
+    if (key === "stroke") return v || 2;
+    if (key === "rough") return v == null ? 1 : v;
+    if (key === "align") return v || (kind === "text" ? "left" : "center");
+    return v == null ? null : v;
+  }
+
   /** Styling with something selected restyles it; with nothing, sets the default. */
   function applyStyle(patch) {
     var target = selectedShape() || selectedLink();
@@ -4099,6 +4705,9 @@
       Object.keys(patch).forEach(function (k) { target[k] = patch[k]; });
       markDirty();
       render();
+      // Another family is another width: the writing may now need more room.
+      var refs = "font" in patch && state.shapeEls[target.id];
+      if (refs && refs.editor) refs.editor.grow();
     }
     refreshInspector();
   }
@@ -4108,13 +4717,13 @@
    * `applyStyle`, because it is the one style that changes geometry: a bigger
    * font can outgrow the box it is in, so the box has to be refitted after.
    */
-  function applyTextSize(delta) {
+  function applyTextSize(delta, absolute) {
     var s = selectedShape();
-    var base = s && !isLinear(s) ? (s.size || TEXT_SIZE) : state.style.size;
-    var next = Math.max(TEXT_RANGE[0], Math.min(TEXT_RANGE[1], base + delta));
+    var base = s && !noText(s) ? (s.size || TEXT_SIZE) : state.style.size;
+    var next = Math.max(TEXT_RANGE[0], Math.min(TEXT_RANGE[1], absolute || base + delta));
     if (next === base) return;
     state.style.size = next;
-    if (s && !isLinear(s)) {
+    if (s && !noText(s)) {
       pushHistory();
       s.size = next;
       markDirty();
@@ -4388,6 +4997,18 @@
         if ((key === "z" && ev.shiftKey) || key === "y") { ev.preventDefault(); redo(); return; }
       }
       if (mod && ev.key.toLowerCase() === "s") { ev.preventDefault(); saveLayout(); return; }
+      if (mod && !typing && ev.key.toLowerCase() === "d" && state.tab === "map" && selectedShape()) {
+        ev.preventDefault();
+        duplicateSelection();
+        return;
+      }
+      if (!typing && !mod && state.tab === "map" && ARROW_KEYS[ev.key]) {
+        var step = ev.shiftKey ? GRID : 1;
+        if (nudgeSelection(ARROW_KEYS[ev.key][0] * step, ARROW_KEYS[ev.key][1] * step)) {
+          ev.preventDefault();
+          return;
+        }
+      }
       // Ctrl+F searches the map. Pressed again while the box has focus, or on a
       // reading tab (plain text), it is the browser's own find, untouched.
       if (mod && !ev.shiftKey && ev.key.toLowerCase() === "f" && state.tab === "map" &&
@@ -4402,6 +5023,8 @@
         if (ev.key === "Escape") ev.target.blur();
         return;
       }
+      if (ev.key === "Escape" && closePops()) return;
+      if (ev.key === "?") { toggleHelp(); return; }
       if (ev.key === "Escape") {
         // On the stage, Escape first lets go of the selection, like any canvas.
         if (state.stage && state.stage.__hasPick && state.stage.__hasPick()) {
@@ -4430,11 +5053,224 @@
         else if (state.stage && (ev.key === "-" || ev.key === "_")) zoomStage(1.25);
         return;
       }
+      if (ev.key === "9") { pickImage(); return; }
+      if (ev.key.toLowerCase() === "q") { setLock(!state.lock); return; }
       var tool = TOOL_KEYS[ev.key.toLowerCase()];
       if (tool) { setTool(tool); return; }
       if (ev.key === "f") fitToView();
+      else if (ev.key === "+" || ev.key === "=") zoomBy(1.2);
+      else if (ev.key === "-" || ev.key === "_") zoomBy(1 / 1.2);
       else if (ev.key === "/") { ev.preventDefault(); el.search.focus(); }
     });
+  }
+
+  /* ------------------------------------------------- menus, theme and help */
+
+  /** Close every open menu; says whether there was one, so Esc stops there. */
+  function closePops() {
+    var any = false;
+    Array.prototype.forEach.call(document.querySelectorAll(".pop"), function (pop) {
+      if (!pop.hidden) any = true;
+      pop.hidden = true;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("[data-pop]"), function (b) {
+      b.setAttribute("aria-expanded", "false");
+    });
+    return any;
+  }
+
+  /* Every menu is a [data-pop] button and the .pop it names. They are fixed to the
+   * screen and placed under their button on open, so the islands can wrap or move
+   * between layouts without the menus having to know. */
+  function wirePops() {
+    document.addEventListener("click", function (ev) {
+      var b = ev.target.closest ? ev.target.closest("[data-pop]") : null;
+      if (b) {
+        var pop = document.getElementById(b.getAttribute("data-pop"));
+        if (!pop) return;
+        var open = pop.hidden;
+        closePops();
+        if (!open) return;
+        pop.hidden = false;
+        b.setAttribute("aria-expanded", "true");
+        var r = b.getBoundingClientRect();
+        var below = r.bottom + pop.offsetHeight + 8 < window.innerHeight;
+        pop.style.top = (below ? r.bottom + 6 : r.top - pop.offsetHeight - 6) + "px";
+        pop.style.left = Math.max(8, Math.min(window.innerWidth - pop.offsetWidth - 8,
+          r.left + r.width / 2 - pop.offsetWidth / 2)) + "px";
+        return;
+      }
+      // A click inside a menu keeps it open — a toggle is often pressed twice —
+      // except on a plain action, which is done once.
+      var inside = ev.target.closest ? ev.target.closest(".pop") : null;
+      if (inside && !ev.target.closest(".pop-item")) return;
+      closePops();
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll("[data-theme-set]"), function (b) {
+      b.addEventListener("click", function () { setTheme(b.getAttribute("data-theme-set")); });
+    });
+    setTheme(storedTheme());
+
+    ["help-btn", "help-open", "help-close"].forEach(function (id) {
+      on(document.getElementById(id), "click", function () { toggleHelp(id !== "help-close"); });
+    });
+  }
+
+  function storedTheme() {
+    try { return localStorage.getItem("croqui.theme") || "auto"; } catch (err) { return "auto"; }
+  }
+
+  /** Light, dark, or whatever the system says — remembered on this machine only. */
+  function setTheme(theme) {
+    var root = document.documentElement;
+    if (theme === "light" || theme === "dark") root.setAttribute("data-theme", theme);
+    else root.removeAttribute("data-theme");
+    try { localStorage.setItem("croqui.theme", theme); } catch (err) { /* private window */ }
+    Array.prototype.forEach.call(document.querySelectorAll("[data-theme-set]"), function (b) {
+      b.setAttribute("aria-pressed", String(b.getAttribute("data-theme-set") === (theme || "auto")));
+    });
+  }
+
+  function toggleHelp(open) {
+    var card = document.getElementById("hint");
+    if (!card) return;
+    card.hidden = open == null ? !card.hidden : !open;
+  }
+
+  /* ------------------------------------------------- copy, as Excalidraw does */
+
+  /** The drawings a Ctrl+C means: the selected one, or the ganged-up ones. */
+  function copyTargets() {
+    var picked = selectedShape();
+    if (picked) return [picked];
+    return shapes().filter(function (s) { return state.markedShapes[s.id]; });
+  }
+
+  /* croqui's polygons, as Excalidraw lines: it has no triangle or hexagon, but a
+   * closed line through the same corners is the same picture over there. */
+  function polygonOf(s) {
+    var w = s.w, h = s.h, cx = w / 2, cy = h / 2;
+    if (s.type === "triangle") return [[cx, 0], [w, h], [0, h], [cx, 0]];
+    if (s.type === "hexagon") {
+      var k = Math.min(w * 0.26, 30);
+      return [[k, 0], [w - k, 0], [w, cy], [w - k, h], [k, h], [0, cy], [k, 0]];
+    }
+    if (s.type === "cloud") {
+      var ring = ringPoints(cx, cy, cx * 0.94, cy * 0.9, 24, 5, true);
+      return ring.concat([ring[0]]);
+    }
+    return null;
+  }
+
+  var EXCALIDRAW_FONT = { hand: 1, normal: 2, code: 3 };
+
+  /**
+   * The selection as an Excalidraw clipboard — the same JSON Excalidraw itself
+   * writes — so Ctrl+C here and Ctrl+V there just works. Each element also carries
+   * the croqui drawing whole in `customData`, a field Excalidraw keeps and ignores:
+   * pasted back into croqui it comes out exactly as it went in, cylinder and all.
+   */
+  function toExcalidraw(list) {
+    var elements = [];
+    var now = Date.now();
+    list.forEach(function (s) {
+      if (isImage(s)) return;   // its bytes live on the server, not on a clipboard
+      var color = s.color || "ink";
+      var poly = polygonOf(s);
+      var type = s.type === "rect" || s.type === "cylinder" ? "rectangle"
+        : s.type === "ellipse" || s.type === "diamond" || s.type === "arrow" || s.type === "line" ||
+          s.type === "text" || s.type === "frame" ? s.type
+        : isPencil(s) ? "freedraw" : poly ? "line" : "rectangle";
+      var el0 = {
+        id: s.id, type: type, x: s.x, y: s.y, width: Math.abs(s.w), height: Math.abs(s.h), angle: 0,
+        strokeColor: EXCALIDRAW_INK[color] || EXCALIDRAW_INK.ink,
+        backgroundColor: s.fill ? (EXCALIDRAW_BG[color] || EXCALIDRAW_BG.ink) : "transparent",
+        fillStyle: s.fill === "hachure" ? "hachure" : "solid",
+        strokeWidth: { 1: 1, 2: 2, 3: 4 }[s.stroke || 2],
+        strokeStyle: s.dash === "dot" ? "dotted" : s.dash ? "dashed" : "solid",
+        roughness: s.rough == null ? 1 : s.rough,
+        opacity: 100, groupIds: [], frameId: null, roundness: null,
+        seed: hashCode(s.id), version: 1, versionNonce: hashCode(s.id + "v"),
+        isDeleted: false, boundElements: [], updated: now, link: null, locked: false,
+        customData: { croqui: JSON.parse(JSON.stringify(s)) },
+      };
+      if (isLinear(s)) {
+        el0.x = s.x; el0.y = s.y;
+        el0.points = [[0, 0], [s.w, s.h]];
+        var heads = s.type === "arrow" ? (s.heads || "end") : "none";
+        el0.startArrowhead = heads === "both" ? "arrow" : null;
+        el0.endArrowhead = heads === "end" || heads === "both" ? "arrow" : null;
+        el0.startBinding = null; el0.endBinding = null;
+      } else if (isPencil(s)) {
+        el0.points = (s.pts || []).map(function (q) { return [q[0] * s.w, q[1] * s.h]; });
+        el0.pressures = [];
+        el0.simulatePressure = true;
+      } else if (poly && type === "line") {
+        el0.points = poly;
+      } else if (type === "frame") {
+        el0.name = s.text || null;
+      } else if (type === "text") {
+        el0.text = el0.originalText = s.text || "";
+        el0.fontSize = s.size || TEXT_SIZE;
+        el0.fontFamily = EXCALIDRAW_FONT[s.font] || 2;
+        el0.textAlign = s.align || "left";
+        el0.verticalAlign = "top";
+        el0.containerId = null;
+        el0.lineHeight = 1.35;
+        el0.autoResize = true;
+      }
+      elements.push(el0);
+      // Writing inside a shape is a text element of its own there, bound to it.
+      if (type !== "text" && type !== "frame" && !noText(s) && s.text) {
+        var tid = s.id + "-t";
+        var bound = !poly;
+        if (bound) el0.boundElements.push({ type: "text", id: tid });
+        elements.push({
+          id: tid, type: "text", x: s.x + 10, y: s.y + s.h / 2 - (s.size || TEXT_SIZE) * 0.7,
+          width: Math.max(10, s.w - 20), height: (s.size || TEXT_SIZE) * 1.35, angle: 0,
+          strokeColor: el0.strokeColor, backgroundColor: "transparent", fillStyle: "solid",
+          strokeWidth: 1, strokeStyle: "solid", roughness: 1, opacity: 100, groupIds: [],
+          frameId: null, roundness: null, seed: hashCode(tid), version: 1, versionNonce: hashCode(tid + "v"),
+          isDeleted: false, boundElements: null, updated: now, link: null, locked: false,
+          text: s.text, originalText: s.text, fontSize: s.size || TEXT_SIZE,
+          fontFamily: EXCALIDRAW_FONT[s.font] || 1, textAlign: s.align || "center",
+          verticalAlign: "middle", containerId: bound ? s.id : null, lineHeight: 1.35,
+          customData: { croquiLabel: true },
+        });
+      }
+    });
+    return { type: "excalidraw/clipboard", elements: elements, files: {} };
+  }
+
+  function wireCopy() {
+    function handle(cut) {
+      return function (ev) {
+        var active = document.activeElement;
+        if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) return;
+        if (state.tab !== "map") return;
+        var list = copyTargets();
+        if (!list.length || !ev.clipboardData) return;
+        ev.preventDefault();
+        ev.clipboardData.setData("text/plain", JSON.stringify(toExcalidraw(list)));
+        var n = list.length;
+        if (!cut) { toast(n + (n > 1 ? " desenhos copiados" : " desenho copiado") + " — cola aqui ou no Excalidraw"); return; }
+        pushHistory();
+        list.forEach(function (sh) {
+          releaseEndsOn(sh.id);
+          var all = shapes();
+          var i = all.indexOf(sh);
+          if (i >= 0) all.splice(i, 1);
+        });
+        state.sel = null;
+        state.editing = null;
+        markDirty();
+        render();
+        refreshInspector();
+      };
+    }
+    document.addEventListener("copy", handle(false));
+    document.addEventListener("cut", handle(true));
   }
 
   /** Zoom the open UML stage about its own centre, for the keyboard. */
@@ -4455,10 +5291,23 @@
       el.insColors.appendChild(b);
     });
 
-    on(el.tools, "click", function (ev) {
-      var b = ev.target.closest("[data-tool]");
-      if (b) setTool(b.getAttribute("data-tool"));
+    on(el.zoom, "click", function (ev) {
+      var b = ev.target.closest("button");
+      if (!b) return;
+      if (b === el.zoomVal) fitToView();
+      else zoomBy(b.getAttribute("data-zoom") === "in" ? 1.2 : 1 / 1.2);
     });
+
+    on(el.tools, "click", function (ev) {
+      if (ev.target.closest("#lock")) { setLock(!state.lock); return; }
+      var b = ev.target.closest("[data-tool]");
+      if (b) { setTool(b.getAttribute("data-tool")); closePops(); }
+    });
+    on(el.imageInput, "change", function () {
+      var file = el.imageInput.files && el.imageInput.files[0];
+      if (file) pasteImage(file, pastePoint());
+    });
+    wirePops();
 
     on(el.inspector, "click", function (ev) {
       var b = ev.target.closest("button");
@@ -4466,11 +5315,15 @@
       if (b.hasAttribute("data-color")) return applyStyle({ color: b.getAttribute("data-color") });
       if (b.hasAttribute("data-heads")) return applyStyle({ heads: b.getAttribute("data-heads") });
       if (b.hasAttribute("data-size")) return applyTextSize(+b.getAttribute("data-size") * TEXT_STEP);
-      var flag = b.getAttribute("data-flag");
-      if (flag === "fill" || flag === "dash") {
-        var cur = selectedShape() || selectedLink() || state.style;
-        return applyStyle(flag === "fill" ? { fill: !cur.fill } : { dash: !cur.dash });
+      if (b.hasAttribute("data-preset")) return applyTextSize(0, TEXT_PRESETS[b.getAttribute("data-preset")]);
+      if (b.hasAttribute("data-set")) {
+        var kv = parseSet(b.getAttribute("data-set"));
+        var patch = {};
+        patch[kv.key] = kv.value;
+        return applyStyle(patch);
       }
+      if (b.hasAttribute("data-dup")) return duplicateSelection();
+      var flag = b.getAttribute("data-flag");
       if (flag === "front") {
         var s = selectedShape();
         if (s) applyStyle({ front: !s.front });
@@ -4560,6 +5413,7 @@
   function syncTabChrome() {
     var onMap = state.tab === "map";
     document.body.classList.toggle("reading", !onMap);
+    document.body.classList.toggle("reading-prd", state.tab === "prd");
     if (el.canvas) el.canvas.hidden = !onMap;
     if (el.doc) el.doc.hidden = onMap;
     if (!onMap) {
@@ -5348,11 +6202,18 @@
     el.docTitle = document.getElementById("doc-title");
     el.docFile = document.getElementById("doc-file");
     el.docBody = document.getElementById("doc-body");
+    el.zoom = document.getElementById("zoom");
+    el.imageInput = document.getElementById("image-input");
+    el.zoomVal = document.getElementById("zoom-val");
     el.insColors = document.getElementById("ins-colors");
+    el.insColorsSec = document.getElementById("ins-colors-sec");
     el.insSize = document.getElementById("ins-size");
     el.insSizeVal = document.getElementById("ins-size-val");
     el.insFill = document.getElementById("ins-fill");
-    el.insDash = document.getElementById("ins-dash");
+    el.insFont = document.getElementById("ins-font");
+    el.insAlign = document.getElementById("ins-align");
+    el.insStroke = document.getElementById("ins-stroke");
+    el.insRough = document.getElementById("ins-rough");
     el.insDashRow = document.getElementById("ins-dash-row");
     el.insHeads = document.getElementById("ins-heads");
     el.insLabelRow = document.getElementById("ins-label-row");
@@ -5363,9 +6224,22 @@
     el.insHint = document.getElementById("ins-hint");
 
     var counts = graph.stats || {};
-    document.getElementById("meta").textContent =
-      graph.project.name + " · " + (counts.route || 0) + " endpoints · " + (counts.table || 0) + " tabelas";
+    // Verb filters and "expandir tudo" act on endpoints; a map without any would
+    // offer buttons that do nothing.
+    if (!counts.route) {
+      ["method-chips", "expand-all"].forEach(function (id) {
+        var node = document.getElementById(id);
+        if (node) node.hidden = true;
+      });
+    }
+    // A map of a CLI or a library has modules, not endpoints — count what is there.
+    var metaEl = document.getElementById("meta");
+    metaEl.textContent = graph.project.name + " · " + (counts.route || !counts.module
+      ? (counts.route || 0) + " endpoints · " + (counts.table || 0) + " tabelas"
+      : counts.module + " módulos" + (counts.table ? " · " + counts.table + " tabelas" : ""));
     document.title = "croqui — " + graph.project.name;
+    // Hidden on narrower screens; the brand still answers on hover.
+    document.getElementById("brand").title = metaEl.textContent;
 
     // The committed view first, so `savedView` is what the file says; then this
     // machine's live one, which may win without making the file look dirty.
@@ -5390,6 +6264,7 @@
     wireCanvas();
     wireChrome();
     wireTools();
+    wireCopy();
     syncTabs();
     setTool("select");
     render();
@@ -5398,6 +6273,16 @@
     state.savedJson = snapshot();
     refreshOrphans();
     syncChrome();
+    // Virgil arrives a moment after the first paint and is wider than the fallback,
+    // so the writing is centred again once the real letters are in.
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(function () {
+        Object.keys(state.shapeEls).forEach(function (id) {
+          var refs = state.shapeEls[id];
+          if (refs && refs.editor) refs.editor.centre();
+        });
+      });
+    }
     // A restored camera is a deliberate choice; re-fitting over it would undo it.
     // It still has to be pushed onto the scene, which only applyView does.
     if (camera) applyView();

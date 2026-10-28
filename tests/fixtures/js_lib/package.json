@@ -1,0 +1,6 @@
+{
+  "name": "jslib",
+  "main": "src/index.js",
+  "bin": { "jslib": "bin/jslib.js" },
+  "dependencies": { "lodash": "^4.17.21" }
+}

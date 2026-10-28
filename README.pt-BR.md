@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/croqui-banner.jpg" width="100%" alt="croqui — uma esfera roxa brilhante contornada por um traço de lápis"></p>
+
 # croqui
 
 **Português** · [English](README.md)
@@ -67,6 +69,8 @@ croqui serve      # abre o mapa editável em localhost:7777
 croqui build      # um .html autocontido — mapa + PRD + diagramas, sem servidor
 croqui prd        # escreve o PRD a partir do mapa, com o modelo que você tiver
 croqui context    # o mesmo mapa em texto, para o contexto de um LLM
+croqui draw       # um diagrama mermaid já estilizado de um endpoint, tabela ou módulo
+croqui lint       # confere um mermaid contra o que a aba UML realmente desenha
 croqui mcp        # roda como servidor MCP, para um agente ler o mapa e escrever documentos
 croqui engines    # com quais modelos esta máquina consegue falar
 croqui update     # atualiza o próprio croqui
@@ -151,7 +155,9 @@ Cada traço da página — o mapa gerado e as formas que você desenha em cima �
 | **roda / shift+roda** | zoom / pan |
 | **URL** | `…/croqui.html#node=route:GET:/v2/crm/leads` abre direto num endpoint |
 
-Claro e escuro seguem o sistema. `✍` troca para uma fonte de escrita à mão onde o sistema tiver uma.
+Claro e escuro seguem o sistema. `✍` passa o mapa inteiro para letra à mão — a Virgil, a própria letra do Excalidraw, que vem com o visualizador (SIL OFL) e é embutida pelo `croqui build`, então fica igual em qualquer máquina.
+
+**−  100%  +** no canto inferior esquerdo dá zoom em torno do meio da tela; o número ajusta o mapa à tela. `+` / `-` no teclado fazem o mesmo.
 
 ## Um arquivo, três abas
 
@@ -352,6 +358,32 @@ coisas) em vez de vasculhar o código, abre no máximo três arquivos para o que
 responde, e nunca chama `enrich`/`prd` sem você pedir. Depois `croqui build .` gera a
 página. `croqui install --uninstall` remove os arquivos.
 
+### Diagramas de graça: `croqui draw` e `croqui lint`
+
+O diagrama mais barato é o que o modelo não precisa escrever.
+
+```sh
+croqui draw "POST /v1/leads"        # o endpoint, sua cadeia até o banco, quem o chama
+croqui draw leads tb_leads --direction TB
+croqui draw                         # uma visão geral, amostrada em 25 nós
+croqui lint                         # todo diagrama da pasta UML
+```
+
+O `draw` lê o `graph.json` e escreve `.croqui/uml/<nome>.mmd` já estilizado — um
+subgraph por camada, as classes da paleta do croqui por tipo e por verbo HTTP,
+`grava: insert` nas arestas de escrita, leituras pontilhadas — sem gastar um token de
+modelo. A saída é determinística, limitada por `--max-nodes` (um comentário `%%` diz o
+que ficou de fora) e marcada com `%% croqui:draw`, então rodar de novo a atualiza;
+apague essa linha para manter suas edições. Ele nunca toca `relacoes.mmd` nem um
+arquivo que outra pessoa escreveu, a menos que você passe `--force`.
+
+O `lint` reaproveita o parser do visualizador, então aponta o que a aba UML vai
+realmente desenhar: `subgraph`/`end` desbalanceados (erro, sai com 1), tipos de
+diagrama não suportados, classes desconhecidas, mais de 25 nós, setas coladas `A-->B`
+que o visualizador leria como um nó, rótulos longos demais. Um modelo roda isso antes
+do `croqui build` em vez de iterar sobre uma imagem que não consegue ver. Os dois
+também são ferramentas MCP: `croqui_draw` e `croqui_lint`.
+
 ### MCP
 
 Para o Claude Code e o Claude Desktop, a mesma coisa sem o copiar e colar:
@@ -384,14 +416,24 @@ acredita ter salvo o seu trabalho.
 Um mapa gerado responde *o que o código faz*. As coisas que você precisa escrever por
 cima — esta coluna inteira é legado, aquela fila entra no próximo trimestre, estes dois
 serviços combinaram um contrato que nada no fonte declara — não estão no código, então
-nenhum scanner vai produzir isso um dia. A régua de ferramentas da esquerda é para elas.
+nenhum scanner vai produzir isso um dia. A barra de ferramentas no alto é para elas.
+
+É a barra do Excalidraw, ferramenta por ferramenta e tecla por tecla — de 1 a 0 na mesma ordem — então a mão treinada lá funciona aqui. As formas que o croqui acrescenta (triângulo, hexágono, cilindro, nuvem), a moldura e o laser ficam atrás do **⋯**, que veste o ícone da que estiver ativa.
 
 | Ferramenta | | |
 |---|---|---|
-| formas | `r` `o` `d` `t` `h` `c` `n` | retângulo, elipse, losango, triângulo, hexágono, cilindro, nuvem |
-| setas | `a` `l` | seta e linha simples, com ponta numa extremidade, nas duas, ou em nenhuma — uma ponta desenhada dentro de uma caixa fica ligada a ela |
-| caixa de texto | `x`, ou **duplo-clique** no papel | redimensionável, sem borda, em qualquer cor e tamanho |
-| relação | `e` | uma aresta nova entre dois nós existentes, com o rótulo que você quiser |
+| trava | `q` | mantém a ferramenta ativa depois de cada forma, para desenhar uma série — o cadeado do Excalidraw |
+| mão | `h`, ou segure **espaço** | arrasta o papel; nada mais responde ao clique |
+| seleção | `v` `1` | escolher, mover, redimensionar, varrer uma seleção |
+| formas | `r` `2` · `d` `3` · `o` `4` | retângulo, losango, elipse — e no **⋯**: triângulo, hexágono, cilindro `c`, nuvem `n` |
+| setas | `a` `5` · `l` `6` | seta e linha simples, com ponta numa extremidade, nas duas, ou em nenhuma — uma ponta desenhada dentro de uma caixa fica ligada a ela |
+| desenho livre | `p` `7` | um traço de lápis, suavizado; redimensiona como qualquer desenho |
+| texto | `t` `x` `8`, ou **duplo-clique** no papel | redimensionável, sem borda, em qualquer cor, tamanho e fonte |
+| imagem | `9` | escolhe uma imagem do disco; ela cai na tela, como uma colada |
+| borracha | `e` `0` | arraste sobre os desenhos para esmaecê-los; ao soltar eles somem, num passo só de desfazer. Uma forma sem fundo só é pega pelo contorno |
+| moldura | `g` | um contêiner com nome, de traço reto, com o nome acima do canto superior esquerdo — duplo-clique para renomear |
+| laser | `k` | um rastro vermelho que some sozinho, para apontar numa tela compartilhada. Nunca é salvo |
+| relação | `j` | uma aresta nova entre dois nós existentes, com o rótulo que você quiser |
 | imagem | **Ctrl+V** | uma imagem colada — um print, uma foto de quadro branco, um painel do Grafana |
 | um desenho do Excalidraw | **Ctrl+V** | caixas, losangos, elipses, setas, linhas, texto e imagens, no arranjo em que foram copiados |
 
@@ -403,8 +445,13 @@ a mesma trepidação com semente do mapa, então o que você acrescenta não par
 - uma caixa de texto com **preenchida** desligado é só a escrita: sem fundo, e sem moldura também assim que tem texto dentro (uma vazia mantém um contorno tracejado fraco, ou você nunca a encontraria)
 - **arraste as alças** para redimensionar; setas ganham uma alça por ponta. Solte uma ponta **dentro de uma caixa** — um nó, ou qualquer desenho seu — e ela fica ligada àquela caixa: a ponta encosta na borda e a acompanha para onde ela for. Uma alça cheia é uma ponta ligada; **Ctrl** ao soltar deixa a ponta livre; arrastar a seta inteira solta as duas pontas, e onde ela cair decide de novo
 - **Del** apaga o que estiver selecionado, **Esc** devolve a ferramenta de ponteiro
-- **A− / A+** no inspetor define o tamanho das letras, de 9 a 44px — no desenho selecionado, ou, sem nada selecionado, no próximo que você desenhar
-- o painelzinho ao lado da régua define cor, preenchimento, tracejado, pontas de seta, se a forma fica **atrás** do mapa (o padrão, para um retângulo servir de moldura em volta de uma cadeia) ou **à frente**, e a qual nó ela está **presa**
+- **arraste um canto** e as letras crescem com a caixa, em px — quadrado maior, letra maior, como no Excalidraw. Uma alça **lateral** só muda o formato, que é como você muda onde uma caixa de texto quebra a linha
+- **P / M / G / GG** e **A− / A+** no inspetor definem o tamanho das letras, de 8 a 160px — no desenho selecionado, ou, sem nada selecionado, no próximo que você desenhar
+- **fonte**: manuscrita (Virgil), normal ou código, por desenho — as três famílias do Excalidraw. Desenhos novos começam na manuscrita; os feitos antes disso seguem o `✍` como sempre
+- **fundo** nenhum / hachura / sólido, **espessura** fina / média / grossa, **traço** contínuo / tracejado / pontilhado, **traçado** arquiteto / artista / cartunista, **alinhamento** esquerda / centro / direita — o painel de propriedades segue o do Excalidraw, e colar do Excalidraw preserva tudo isso
+- **Ctrl+D** duplica o desenho selecionado, as **setas do teclado** o movem (Shift: um quadrado da grade), e cada ferramenta mostra sua tecla no canto
+- **Ctrl+C** / **Ctrl+X** põem a seleção na área de transferência como uma cópia do Excalidraw: cole no Excalidraw e ela chega como formas do Excalidraw; cole de volta aqui e ela volta exatamente como saiu, porque cada elemento também carrega o desenho do croqui em `customData`
+- o painel de propriedades à esquerda define cor, preenchimento, tracejado, pontas de seta, se a forma fica **atrás** do mapa (o padrão, para um retângulo servir de moldura em volta de uma cadeia) ou **à frente**, e a qual nó ela está **presa**
 
 ### Imagens coladas
 
@@ -449,11 +496,13 @@ tudo com o lápis dele:
 |---|---|
 | retângulo, losango, elipse | a mesma forma, no mesmo tamanho |
 | seta, linha | seta ou linha, guardando a direção e em que pontas há cabeça — e a que caixa cada ponta estava ligada, quando essa caixa veio na mesma cópia |
-| texto | uma caixa de texto, no tamanho de fonte que tinha, limitado aos 9–44px em que o croqui desenha |
+| texto | uma caixa de texto, no tamanho de fonte que tinha (8–160px), na família correspondente — Virgil/Excalifont como manuscrita, Cascadia/Comic Shanns como código, o resto como normal — e com o alinhamento |
 | rótulo dentro de uma caixa | a escrita da própria caixa — não uma segunda forma por cima dela |
 | rótulo numa seta | uma caixa de texto própria, onde o Excalidraw a tinha (as setas do croqui não guardam texto) |
 | cor do traço | a mais próxima das oito cores do croqui; um traço neutro vira `ink`, que acompanha o tema |
-| fundo, tracejado | **preenchida** e **tracejada** na forma |
+| fundo, traço | fundo sólido vira a tinta do croqui; hachura, xadrez e zigue-zague viram a hachura; espessura, contínuo/tracejado/pontilhado e traçado vêm junto |
+| desenho livre | um traço livre, ponto a ponto |
+| moldura | uma moldura do croqui, com o nome |
 | imagem (PNG, JPEG, GIF, WebP) | uma imagem, no mesmo lugar e tamanho — gravada em `.croqui/images/` como qualquer imagem colada; setas presas a ela continuam presas |
 
 O arranjo é preservado — a cópia inteira se desloca em grupo até o seu cursor, na ordem em
@@ -461,8 +510,8 @@ que estava empilhada — e a colagem é um passo único de desfazer. O que cai e
 se prende a ele como qualquer outro desenho.
 
 Algumas coisas não atravessam, e o aviso diz quais apareceram (*8 desenhos colados —
-fora: 1 rabisco*): **rabiscos à mão livre**, **molduras e embeds** e **imagens SVG** — o
-croqui não tem equivalente para eles — e a **seta com cotovelos**, que chega como um traço
+fora: 1 embed*): **embeds** e **imagens SVG** — o croqui não tem equivalente para
+eles — e a **seta com cotovelos**, que chega como um traço
 reto entre as duas pontas. A **rotação** também se perde: um retângulo inclinado entra
 reto. Imagens precisam do `croqui serve` (vão para o disco); num `croqui.html` só de
 leitura o resto da cópia cola normalmente e o aviso diz que as imagens ficaram de fora.
@@ -645,6 +694,7 @@ arquitetura e não a sua intenção, e o cabeçalho que ele escreve diz isso tam
 |---|---|---|
 | Python / FastAPI | `APIRouter`, DI com `Depends`, prefixos | models SQLAlchemy, SQL inline |
 | Python / Flask | `@app.route`, Blueprints (aninhados), `MethodView`, `add_url_rule`, flask-restful | Flask-SQLAlchemy (`db.Model`), `session`, SQL inline |
+| Qualquer código (`code/structure`) | pontos de entrada: `[project.scripts]`, `__main__`, `bin`/`main` do package.json, `main()` em Java/Kotlin/Go, `bin/`, `scripts/` | módulos e seus imports (Python, JS/TS, Java/Kotlin, Go), pacotes de terceiros, SQL inline |
 | Python / Django | `urls.py` + `include`, views de função e de classe, viewsets e routers DRF, `@action` | models do Django ORM (`db_table` ou `app_model`), cadeias `objects`, `.raw`, cursores |
 | Node / Express | verbos em `app`/`router`, `router.route()`, `use()` entre arquivos | Prisma, TypeORM, Sequelize, Knex, SQL puro |
 | Node / NestJS | `@Controller` + `@Get`…, prefixo global, versionamento, `@ApiOperation` | TypeORM `@InjectRepository`, Prisma, repositórios próprios |
@@ -654,6 +704,17 @@ Toda stack resolve rota → service → repositório → tabela, além de rotas 
 tabelas direto, e só desenha tabelas que o próprio repositório define (DDL, migrations
 ou models do ORM). Um monorepo com várias stacks vira um mapa só: o `scan` roda todo
 adaptador que detectar. `--stack python/django,node/nestjs` sobrepõe a detecção.
+
+### Código que não é uma API
+
+Uma CLI, uma biblioteca, um worker ou um jogo não têm rotas, e o `scan` não desiste
+mais deles. Quando nenhum framework de API é encontrado — ou um é detectado mas não
+rende rota nenhuma, como o próprio croqui, que cita Flask no seu código — ele mapeia a
+**estrutura**: pontos de entrada à esquerda, módulos em faixas pela profundidade de
+import (o que ninguém importa primeiro, aquilo em que todos se apoiam por último),
+pacotes de terceiros à direita, e as tabelas que algum SQL inline toca. Passando de 80
+arquivos, os módulos são agrupados por pasta para o mapa continuar legível.
+`--stack code/structure` força esse modo, e ele se combina com uma stack de API num monorepo.
 
 Adaptadores moram em `croqui/adapters/`, um módulo por stack.
 

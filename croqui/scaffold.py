@@ -42,7 +42,9 @@ MAX_NODES = 150
 # kind -> (frame title, id prefix, label open, label close). The shapes match the
 # map: a table is a cylinder there too.
 FRAMES = (
+    ("entry", "entradas", "e", '>"', '"]'),
     ("route", "endpoints", "r", '(["', '"])'),
+    ("module", "módulos", "m", '("', '")'),
     ("service", "serviços", "s", '["', '"]'),
     ("repo", "repositórios", "p", '[["', '"]]'),
     ("table", "tabelas", "t", '[("', '")]'),
@@ -191,7 +193,9 @@ def prd_template(graph: dict, today: datetime.date, relation: str | None = None)
     counted = " · ".join(
         f"{stats[kind]} {one if stats[kind] == 1 else many}"
         for kind, one, many in (
+            ("entry", "entrada", "entradas"),
             ("route", "endpoint", "endpoints"),
+            ("module", "módulo", "módulos"),
             ("service", "serviço", "serviços"),
             ("repo", "repositório", "repositórios"),
             ("table", "tabela", "tabelas"),

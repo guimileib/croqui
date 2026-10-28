@@ -11,6 +11,9 @@ from .fastapi_py import FastApiScanner
 from .flask_py import FlaskScanner
 from .nestjs_ts import NestScanner
 from .spring_java import SpringScanner
+from .structure import StructureScanner
+
+FALLBACK_STACK = "code/structure"
 
 ADAPTERS = {
     "python/fastapi": FastApiScanner,
@@ -19,6 +22,8 @@ ADAPTERS = {
     "node/express": ExpressScanner,
     "node/nestjs": NestScanner,
     "java/spring": SpringScanner,
+    # Not an API stack: detect_stacks never picks it, the CLI falls back to it.
+    FALLBACK_STACK: StructureScanner,
 }
 
 
@@ -37,10 +42,14 @@ def _is_fastapi(root: Path) -> bool:
 
 
 def detect_stacks(root: Path) -> list[str]:
-    """Every stack this project uses, in ``ADAPTERS`` order (a monorepo can have several)."""
+    """Every API stack this project uses, in ``ADAPTERS`` order (a monorepo can have several).
+
+    ``code/structure`` is never listed: it matches any source file, so adding it would
+    clutter every API map. ``croqui scan`` falls back to it when this comes back empty.
+    """
     found = ["python/fastapi"] if _is_fastapi(root) else []
     for stack, adapter in ADAPTERS.items():
-        if stack != "python/fastapi" and adapter.detect(root):
+        if stack not in (FALLBACK_STACK, "python/fastapi") and adapter.detect(root):
             found.append(stack)
     return found
 
@@ -51,4 +60,4 @@ def detect_stack(root: Path) -> str | None:
     return stacks[0] if stacks else None
 
 
-__all__ = ["ADAPTERS", "detect_stack", "detect_stacks"]
+__all__ = ["ADAPTERS", "FALLBACK_STACK", "detect_stack", "detect_stacks"]
