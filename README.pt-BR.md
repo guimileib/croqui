@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/croqui-banner.jpg" width="100%" alt="croqui — uma esfera roxa brilhante contornada por um traço de lápis"></p>
+
 # croqui
 
 **Português** · [English](README.md)

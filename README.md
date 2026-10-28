@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/croqui-banner.jpg" width="100%" alt="croqui — a glossy purple sphere ringed by a pencil sketch"></p>
+
 # croqui
 
 **English** · [Português](https://github.com/guimileib/croqui/blob/main/README.pt-BR.md)
