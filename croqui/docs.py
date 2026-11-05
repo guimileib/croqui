@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import html
+import json
 import mimetypes
 import re
 from pathlib import Path
@@ -19,10 +20,13 @@ SECTIONS = {
     # A PRD may also be a finished HTML page (an export, a prototype write-up):
     # the viewer shows it in a sandboxed frame instead of through markdown.
     "prd": (("prd", "docs/prd", "PRD"), (".md", ".markdown", ".txt", ".html", ".htm")),
-    "uml": (("uml", "docs/uml", "UML"), (".mmd", ".mermaid", ".md", ".markdown", ".txt")),
+    # An Excalidraw file is drawn on the tab by the map's own pencil.
+    "uml": (("uml", "docs/uml", "UML"), (".mmd", ".mermaid", ".md", ".markdown", ".txt", ".excalidraw")),
 }
 SEARCH_ROOTS = (".croqui", "")
 MAX_DOC_BYTES = 512 * 1024
+# A drawing carries its pictures inline, as data URLs; it gets more room than prose.
+MAX_DRAWING_BYTES = 4 * 1024 * 1024
 MAX_DOCS_PER_SECTION = 60
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache"}
 
@@ -41,7 +45,27 @@ def _pretty(stem: str) -> str:
     return (text[:1].upper() + text[1:]) if text else stem
 
 
+def _drawing_title(text: str) -> str | None:
+    """An Excalidraw file has no title field: its title is the biggest writing in it."""
+    try:
+        doc = json.loads(text)
+    except ValueError:
+        return None
+    best: tuple[float, float, str] | None = None
+    for el in (doc.get("elements") if isinstance(doc, dict) else None) or []:
+        if not isinstance(el, dict) or el.get("type") != "text" or el.get("isDeleted") or el.get("containerId"):
+            continue
+        body = str(el.get("originalText") or el.get("text") or "").strip().split("\n")[0].strip()
+        size = el.get("fontSize") if isinstance(el.get("fontSize"), (int, float)) else 0
+        y = el.get("y") if isinstance(el.get("y"), (int, float)) else 0
+        if body and (best is None or (size, -y) > (best[0], -best[1])):
+            best = (size, y, body)
+    return best[2][:80] if best else None
+
+
 def _title_of(text: str, path: Path, section: str) -> str:
+    if path.suffix.lower() == ".excalidraw":
+        return _drawing_title(text) or _pretty(path.stem)
     if section == "uml":
         found = MERMAID_TITLE_RE.search(text[:400])
         if found:
@@ -82,8 +106,9 @@ def collect_section(root: Path, section: str) -> list[dict]:
                 continue
             if any(part in SKIP_DIRS or part.startswith(".") for part in path.relative_to(directory).parts):
                 continue
+            drawing = path.suffix.lower() == ".excalidraw"
             try:
-                if path.stat().st_size > MAX_DOC_BYTES:
+                if path.stat().st_size > (MAX_DRAWING_BYTES if drawing else MAX_DOC_BYTES):
                     continue
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
@@ -97,7 +122,8 @@ def collect_section(root: Path, section: str) -> list[dict]:
             found.append({
                 "name": rel,
                 "title": _title_of(text, path, section),
-                "format": "html" if path.suffix.lower() in (".html", ".htm") else "markdown",
+                "format": "html" if path.suffix.lower() in (".html", ".htm")
+                else "excalidraw" if drawing else "markdown",
                 "text": text,
             })
     return found

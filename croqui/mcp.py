@@ -98,10 +98,11 @@ TOOLS = [
     {
         "name": "croqui_draw",
         "description": (
-            "Draw a styled Mermaid flowchart straight from the map, with no model involved: the "
+            "Draw a styled diagram straight from the map, with no model involved: the "
             "endpoint, its chain down to the tables, and who calls it. Use this before writing a "
             "diagram by hand, then edit only what the map cannot know (a business condition, a "
-            "better name). Without `targets` it draws an overview. Writes into uml/ and replaces "
+            "better name). Without `targets` it draws an overview. `format: excalidraw` writes a "
+            "presentation diagram instead of Mermaid. Writes into uml/ and replaces "
             "only a file it wrote itself; refuses anything else unless `force` is true."
         ),
         "inputSchema": {
@@ -112,6 +113,9 @@ TOOLS = [
                                            "tables or service names"},
                 "name": {"type": "string", "description": "file name, e.g. fluxo-leads.mmd (default: from the targets)"},
                 "direction": {"type": "string", "enum": ["LR", "TB"], "default": "LR"},
+                "format": {"type": "string", "enum": ["mermaid", "excalidraw"], "default": "mermaid",
+                           "description": "excalidraw: a presentation diagram with sections, evidence "
+                                          "(columns, methods, handlers) and colour as meaning"},
                 "title": {"type": "string"},
                 "depth": {"type": "integer", "default": 4, "description": "hops downstream of each target"},
                 "max_nodes": {"type": "integer", "default": 25},
@@ -282,6 +286,7 @@ def _tool_draw(root: Path, args: dict) -> str:
             graph, [str(t) for t in targets],
             depth=_int(args, "depth", 4), max_nodes=_int(args, "max_nodes", 25),
             direction=str(args.get("direction") or "LR"), title=args.get("title") or None,
+            format=str(args.get("format") or "mermaid"),
         )
         if args.get("preview"):
             return drawing.text

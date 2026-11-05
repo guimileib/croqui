@@ -68,8 +68,9 @@ croqui serve      # open the editable map on localhost:7777
 croqui build      # one self-contained .html — map + PRD + diagrams, no server
 croqui prd        # write the PRD from the map, with whatever model you have
 croqui context    # the same map as text, for an LLM's context window
-croqui draw       # a styled mermaid diagram of an endpoint, table or module, from the map
-croqui lint       # check a mermaid file against what the UML tab actually draws
+croqui draw       # a styled diagram of an endpoint, table or module, from the map (mermaid or excalidraw)
+croqui lint       # check a mermaid or excalidraw file against what the UML tab actually draws
+croqui design     # the design method for diagrams that argue, for a model drawing one by hand
 croqui mcp        # run as an MCP server, so an agent can read it and write documents
 croqui engines    # which models this machine can talk to
 croqui update     # update croqui itself
@@ -138,15 +139,17 @@ Every stroke on the page — the generated map and the shapes you draw on it —
 | **⇤ / ⇥** | widen the panel for long documentation |
 | **realce** | dim the rest of the map. **Off by default.** With it on, the pointer highlights whatever it is over — and **clicking a box pins the highlight there**, so it survives moving the cursor away to read the panel. Hovering something else previews that chain; leaving it returns to the pinned one; closing the panel lets go |
 | **drag** a box or drawing | move it |
-| **drag on the paper** | sweep a selection rectangle — boxes and drawings light up as it grows. Dragging any picked item moves them all in a single undo step. **Esc** or a click on the paper clears it |
+| **drag on the paper** | sweep a selection rectangle — every box and drawing it touches is outlined as it grows, and stays outlined once picked, with a dashed box round the lot. Dragging any picked item moves them all in a single undo step; **Del** deletes the picked drawings (the boxes are the code's, and stay). **Esc** or a click on the paper clears it |
 | **shift+click** / **shift+drag** | add to the selection instead of starting over |
 | **Ctrl+A** | select every box and drawing on the map |
 | **Space + drag**, the middle button, or the hand tool (`h`) | pan, with the grabbing hand — from anywhere, even starting on a box |
 | **Ctrl+Z / Ctrl+Shift+Z** | undo / redo — up to 100 steps |
 | **Ctrl+S** or **salvar alterações** | write `layout.json` — the arrangement you see, plus the view. Nothing is written before that |
 | **órfãs** | appears only when the layout names nodes the code no longer has; lists them and can discard them |
-| **double-click the paper** | a text box, right there — see *Drawing on the map* below |
-| **Ctrl+V** | paste onto the map, where the cursor is: a picture, plain text, or an Excalidraw selection — shapes, arrows and all |
+| **double-click** | on bare paper, a new text box right there; on a text box or a shape, the caret in its writing — see *Drawing on the map* below |
+| **Ctrl+V** | paste onto the map, where the cursor is: a picture, plain text, or an Excalidraw selection — shapes, arrows and all. A pasted batch arrives selected, so one drag places it and **Del** takes it back out |
+| **drop a file**, or **☰ → importar diagrama…** | a `.excalidraw` or a mermaid `.mmd` becomes drawings on the map — see *[Importing a diagram](#importing-a-diagram)* |
+| **voltar ao conteúdo** | shows up when you have panned off into empty paper with nothing of the map on screen; it glides back to the whole map |
 | **tabs** | `mapa` · `PRD` · `UML` — see *[One file, three tabs](#one-file-three-tabs)*. **Esc** or **m** goes back to the map |
 | **isolate this chain** | show only one endpoint's path to the database |
 | **Ctrl+F** or **/** | search routes, tables, **columns**, services, handlers and docs. A counter shows the hits; **Enter** / **Shift+Enter** pans to the next / previous one and opens it, expanding its group if needed; **Esc** clears. Ctrl+F again (box already focused) is the browser's own find |
@@ -248,9 +251,14 @@ poster; a diagram you want to *read* belongs on the UML tab, which is a viewport
 
 ### The UML tab
 
-`.mmd`, `.mermaid` or `.md` holding mermaid source. The first scan already put
-`relacoes.mmd` there; add your own beside it — ask an LLM for a diagram of your PRD,
-drop the file in the same folder, reload.
+`.mmd`, `.mermaid` or `.md` holding mermaid source, or an `.excalidraw` file. The first
+scan already put `relacoes.mmd` there; add your own beside it — ask an LLM for a diagram
+of your PRD, drop the file in the same folder, reload.
+
+An `.excalidraw` file is read by the same importer as an Excalidraw paste and drawn by
+the map's own pencil (its title is its biggest writing). **levar ao mapa**, top right
+of every diagram, copies it onto the map as ordinary drawings — the file is untouched,
+and a mermaid diagram goes over with the boxes where you dragged them on the tab.
 
 **The tab is a viewport, not a page.** The diagram takes the whole panel and gets its
 own pan and zoom: **wheel** to zoom about the cursor, **Space + drag** (or the middle
@@ -348,8 +356,12 @@ croqui install --project  # into this repo instead, to commit for the team
 | Codex | `$croqui …` (or `/prompts:croqui …`) |
 | Gemini CLI | `/croqui …` |
 
-The command draws whatever you ask, of this codebase or of an idea, as a Mermaid
-diagram in the UML tab, in croqui's palette. It is built to be cheap: the model reads
+The command draws whatever you ask, of this codebase or of an idea, in the UML tab:
+a Mermaid diagram for a quick view, or an Excalidraw one when the job is to explain or
+present — drawn to the method `croqui design` prints, adapted from
+[coleam00/excalidraw-diagram-skill](https://github.com/coleam00/excalidraw-diagram-skill):
+a diagram argues instead of listing, at three zoom levels, with real evidence and
+colour as meaning, checked with `croqui lint` until clean. It is built to be cheap: the model reads
 `croqui context --node …` (a few KB of static analysis, no tokens spent finding
 things) instead of crawling the source, opens at most three files for what the map
 cannot say, and never calls `enrich`/`prd` unless asked. Then `croqui build .` makes
@@ -363,6 +375,7 @@ The cheapest diagram is the one the model does not have to write.
 croqui draw "POST /v1/leads"        # the endpoint, its chain to the database, who calls it
 croqui draw leads tb_leads --direction TB
 croqui draw                         # an overview, sampled to 25 nodes
+croqui draw "POST /v1/leads" --format excalidraw   # the same, as a diagram that argues
 croqui lint                         # every diagram in the UML folder
 ```
 
@@ -373,10 +386,24 @@ capped at `--max-nodes` (a `%%` comment says what it left out) and marked
 `%% croqui:draw`, so a re-run refreshes it; delete that line to keep your edits.
 It never touches `relacoes.mmd` or a file somebody else wrote, unless `--force`.
 
+`--format excalidraw` writes `<name>.excalidraw` instead, laid out to argue rather than
+list: a title over the whole flow in one line (*API (12) → domínio (1) → dados (3)*), a
+section per layer named in free text, and inside each the evidence the map already
+has — a table's real columns in a code block, a service's methods, the handler and
+`file:line` behind an endpoint. Shape and colour carry meaning (an endpoint is an
+ellipse in its verb's colour, an external system is dashed), arrows are bound to what
+they join and go round the layers they skip, and past six endpoints an overview gives
+one block per resource, listing its requests. It opens in Excalidraw as is, the UML tab
+draws it, and pasted on the map it keeps croqui's palette. The file is marked
+`croqui:draw` in its `"source"` field, with the same re-run contract as the Mermaid.
+
 `lint` ports the viewer's parser, so it reports what the UML tab will really draw:
 unbalanced `subgraph`/`end` (error, exit 1), unsupported diagram types, unknown
 classes, more than 25 nodes, `A-->B` glued arrows the viewer would read as a node,
-overlong labels. A model runs it before `croqui build` instead of iterating on a
+overlong labels. On an `.excalidraw` it does the defect pass of a render-and-look loop
+on the geometry: repeated ids and broken bindings (errors), writing that does not fit
+its shape, shapes or loose text on top of each other, arrows that stop short of what
+they are bound to. A model runs it before `croqui build` instead of iterating on a
 picture it cannot see. Both are also MCP tools: `croqui_draw` and `croqui_lint`.
 
 ### MCP
@@ -431,12 +458,12 @@ It is Excalidraw's bar, tool for tool and key for key — 1 to 0 run along it in
 
 Drag to size it, or click once for a sensible default. Everything is drawn with the same seeded wobble as the map itself, so what you add does not look pasted on.
 
-- **double-click** is the one gesture for writing: on bare paper it drops a new text box where you clicked, on a drawing it puts the caret inside that drawing. A text box grows downward as you fill it
+- **double-click** is the one gesture for writing: on bare paper it drops a new text box where you clicked, on a drawing it puts the caret inside that drawing — anywhere inside it, even the empty middle of an unfilled box. The text tool on an existing text box edits it too, instead of stacking a second box on top. A text box grows downward as you fill it
 - **drag the writing itself** to move a text box, even with the caret still in it — a click places the caret, a drag moves the label
 - a text box with **preenchida** off is just the writing: no background, and no frame either once there is text in it (an empty one keeps a faint dashed outline, or you would never find it)
 - **drag the handles** to resize; arrows get one handle per end. Let an end go **inside a box** — a node, or any drawing of yours — and it holds on to that box: the tip sits on its edge and follows it wherever it goes. A filled handle is an end that is holding on; **Ctrl** while letting go keeps it free; dragging the arrow itself lets go of both ends, and where it lands decides anew
-- **Del** removes what is selected, **Esc** puts the pointer tool back
-- **drag a corner** and the letters scale with the box, in px — a bigger square is bigger writing, as in Excalidraw. A **side** handle only reshapes it, which is how you change where a text box wraps
+- **Del** removes what is selected — one drawing, or every drawing in a sweep — and **Esc** puts the pointer tool back
+- **drag a corner** and the letters scale with the box, in px — a bigger square is bigger writing, as in Excalidraw. A **side** handle changes where the writing wraps, and the box follows its lines: narrower is taller, wider is shorter, so the frame always matches the text. Any other shape stops shrinking where its writing would be cut
 - **P / M / G / GG** and **A− / A+** in the inspector set the size of the letters, from 8 to 160px — on the selected drawing, or, with nothing selected, on the next one you draw
 - **font**: handwriting (Virgil), normal or code, per drawing — Excalidraw's three families. New drawings start in handwriting; drawings made before this follow the `✍` toggle as they always did
 - **fill** none / hachure / solid, **stroke** thin / medium / bold, **line** solid / dashed / dotted, **sloppiness** architect / artist / cartoonist, **alignment** left / centre / right — the properties panel is laid out like Excalidraw's, and pasting from Excalidraw keeps all of them
@@ -487,7 +514,7 @@ redraws it with its own pencil:
 | in Excalidraw | in croqui |
 |---|---|
 | rectangle, diamond, ellipse | the same shape, at the same size |
-| arrow, line | arrow or line, keeping direction and which ends carry a head — and which box each end held on to, when that box came along in the same copy |
+| arrow, line | arrow or line, keeping direction and which ends carry a head — and which box each end held on to, when that box came along in the same copy. A curved one keeps its bend |
 | text | a text box, at the font size it had (8–160px), in the matching family — Virgil/Excalifont as handwriting, Cascadia/Comic Shanns as code, the rest as normal — and with its alignment |
 | freehand | a freehand stroke, point for point |
 | frame | a croqui frame, with its name |
@@ -504,13 +531,33 @@ node attaches to it like any other drawing.
 A few things do not survive the crossing, and the toast says which of them turned up
 (*8 desenhos colados — fora: 1 embed*): **embeds** and **SVG images** — croqui has no
 counterpart for them — and an **elbowed arrow**, which
-arrives as a straight run between its two ends. **Rotation** is lost too: a tilted
+arrives as one curve round the same corner. **Rotation** is lost too: a tilted
 rectangle comes in square. Images need `croqui serve` (they are written to disk); in a
 read-only `croqui.html` the rest of the copy still pastes and the toast says the
 images stayed out.
 
 Pasting with the caret inside a text box works the way you expect: plain text goes in
 at the caret, and an Excalidraw copy goes in as its writing, not as JSON.
+
+The batch arrives selected and outlined, so a second paste on top of the first is
+never invisible. A copy that lists one element twice is pasted once. And on Linux,
+where a middle click pastes the last thing selected, panning with the middle button
+does not drop another copy on the map.
+
+### Importing a diagram
+
+A whole diagram comes onto the map three ways: **drop the file** on the map, **☰ →
+importar diagrama…**, or **levar ao mapa** on the UML tab. An `.excalidraw` file goes
+through the same importer as a paste; a mermaid `.mmd` (or the first mermaid block of a
+`.md`) is laid out as the UML tab lays it out and turned into drawings — nodes in their
+shapes and palette colours, subgraphs as frames, the title as a heading, arrows bound to
+the boxes they join and arced round the boxes in their way, and each edge label beside
+its arrow.
+
+It lands where you are looking when there is room, otherwise on clear paper under the
+map, never on top of the boxes; it stays on the paper rather than attaching to the
+nodes it crosses; and it arrives selected, with the camera on it, so one drag puts it
+where you want it. One undo step takes it all back.
 
 ### Relations you draw yourself
 

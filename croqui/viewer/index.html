@@ -60,6 +60,9 @@
   <button class="pop-item" id="hand" aria-pressed="false" title="o mapa inteiro em letra à mão">
     <svg viewBox="0 0 20 20"><path d="M4 15.5c2.5-1 3.5-6 6-9.5 1.2-1.7 3.4-1.2 2.6 1-1 2.8-4.6 5.4-2.6 7 1.4 1.1 3.6-1 6-2.2"/></svg>letra à mão no mapa
   </button>
+  <button class="pop-item" id="import-open" title="um .excalidraw, ou um diagrama mermaid (.mmd) — também dá para soltar o arquivo no mapa">
+    <svg viewBox="0 0 20 20"><path d="M10 3.5v9M6.5 9l3.5 3.5L13.5 9M4 13.5v2.5h12v-2.5"/></svg>importar diagrama…
+  </button>
   <div class="pop-row" role="group" aria-label="tema">
     <span>tema</span>
     <button class="mini" data-theme-set="auto" aria-pressed="true">sistema</button>
@@ -161,6 +164,7 @@
     </div>
   </div>
   <input type="file" id="image-input" accept="image/png,image/jpeg,image/gif,image/webp" hidden>
+  <input type="file" id="import-input" accept=".excalidraw,.json,.mmd,.mermaid,.md,application/json,text/plain" hidden>
 </div>
 
 <div id="inspector" hidden>
@@ -256,9 +260,10 @@
   <dl>
     <dt>ferramentas</dt><dd><kbd>H</kbd> mão · <kbd>V</kbd> seleção · <kbd>R</kbd> retângulo · <kbd>D</kbd> losango · <kbd>O</kbd> elipse · <kbd>A</kbd> seta · <kbd>L</kbd> linha · <kbd>P</kbd> desenho livre · <kbd>T</kbd> texto · <kbd>9</kbd> imagem · <kbd>E</kbd> borracha · <kbd>G</kbd> moldura · <kbd>K</kbd> laser · <kbd>J</kbd> relação · <kbd>Q</kbd> trava a ferramenta</dd>
     <dt>navegar</dt><dd><kbd>espaço</kbd>+arrastar ou botão do meio · <kbd>roda</kbd> zoom · <kbd>+</kbd> <kbd>−</kbd> · <kbd>F</kbd> ajustar à tela</dd>
-    <dt>selecionar</dt><dd>arrastar no papel · <kbd>shift</kbd> soma · <kbd>Ctrl+A</kbd> tudo · <kbd>setas</kbd> movem (shift: um quadrado)</dd>
+    <dt>selecionar</dt><dd>arrastar no papel · <kbd>shift</kbd> soma · <kbd>Ctrl+A</kbd> tudo · <kbd>setas</kbd> movem (shift: um quadrado) · <kbd>Del</kbd> apaga os desenhos selecionados</dd>
     <dt>editar</dt><dd><kbd>duplo-clique</kbd> escreve · <kbd>Ctrl+D</kbd> duplica · <kbd>Ctrl+C</kbd>/<kbd>Ctrl+X</kbd> copia/recorta (vale colar no Excalidraw) · <kbd>Del</kbd> apaga · <kbd>Ctrl+Z</kbd> desfaz · <kbd>Ctrl+S</kbd> grava</dd>
     <dt>colar</dt><dd><kbd>Ctrl+V</kbd> imagem, texto ou um desenho do Excalidraw, onde o cursor está</dd>
+    <dt>importar</dt><dd>solte um <kbd>.excalidraw</kbd> ou <kbd>.mmd</kbd> no mapa, use o menu, ou “levar ao mapa” na aba UML</dd>
     <dt>mapa</dt><dd>clique num grupo expande os endpoints · <kbd>Ctrl+F</kbd> ou <kbd>/</kbd> busca</dd>
   </dl>
 </div>
@@ -273,6 +278,8 @@
 </div>
 
 <button class="island ibtn" id="help-btn" title="atalhos  (?)">?</button>
+
+<button class="island" id="lost" type="button" hidden title="ajustar o mapa à tela  (f)">voltar ao conteúdo</button>
 
 <div id="legend" aria-label="legenda"></div>
 

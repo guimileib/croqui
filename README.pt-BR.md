@@ -69,8 +69,9 @@ croqui serve      # abre o mapa editável em localhost:7777
 croqui build      # um .html autocontido — mapa + PRD + diagramas, sem servidor
 croqui prd        # escreve o PRD a partir do mapa, com o modelo que você tiver
 croqui context    # o mesmo mapa em texto, para o contexto de um LLM
-croqui draw       # um diagrama mermaid já estilizado de um endpoint, tabela ou módulo
-croqui lint       # confere um mermaid contra o que a aba UML realmente desenha
+croqui draw       # um diagrama já estilizado de um endpoint, tabela ou módulo (mermaid ou excalidraw)
+croqui lint       # confere um mermaid ou excalidraw contra o que a aba UML realmente desenha
+croqui design     # o método de design de diagramas que argumentam, para o modelo que desenha à mão
 croqui mcp        # roda como servidor MCP, para um agente ler o mapa e escrever documentos
 croqui engines    # com quais modelos esta máquina consegue falar
 croqui update     # atualiza o próprio croqui
@@ -139,15 +140,17 @@ Cada traço da página — o mapa gerado e as formas que você desenha em cima �
 | **⇤ / ⇥** | alarga o painel para documentação longa |
 | **realce** | escurece o resto do mapa. **Desligado por padrão.** Com ele ligado, o ponteiro realça o que estiver embaixo — e **clicar num quadro fixa o realce nele**, então ele sobrevive a você levar o cursor embora para ler o painel. Passar por cima de outro pré-visualiza aquela cadeia; ao sair, volta para o fixado; fechar o painel solta |
 | **arrastar** uma caixa ou desenho | move |
-| **arrastar no papel** | desenha um retângulo de seleção — caixas e desenhos acendem enquanto ele cresce. Arrastar qualquer item selecionado move todos num único passo de desfazer. **Esc** ou um clique no papel limpa |
+| **arrastar no papel** | desenha um retângulo de seleção — cada caixa e desenho que ele toca ganha um contorno enquanto ele cresce, e continua contornado depois de selecionado, com uma caixa tracejada em volta do conjunto. Arrastar qualquer item selecionado move todos num único passo de desfazer; **Del** apaga os desenhos selecionados (as caixas são do código e ficam). **Esc** ou um clique no papel limpa |
 | **shift+clique** / **shift+arrastar** | soma à seleção em vez de recomeçar |
 | **Ctrl+A** | seleciona todas as caixas e desenhos do mapa |
 | **espaço + arrastar**, ou o botão do meio | navega, com a mão de grab — de qualquer lugar, até começando em cima de uma caixa |
 | **Ctrl+Z / Ctrl+Shift+Z** | desfaz / refaz — até 100 passos |
 | **Ctrl+S** ou **salvar alterações** | escreve o `layout.json` — o arranjo que você vê, mais a vista. Nada é escrito antes disso |
 | **órfãs** | aparece só quando o layout nomeia nós que o código não tem mais; lista e sabe descartar |
-| **duplo-clique no papel** | uma caixa de texto, ali mesmo — veja *Desenhar no mapa* abaixo |
-| **Ctrl+V** | cola no mapa, onde o cursor está: uma imagem, um texto, ou uma seleção do Excalidraw — com formas e setas |
+| **duplo-clique** | no papel nu, uma caixa de texto nova ali mesmo; numa caixa de texto ou forma, o cursor na escrita dela — veja *Desenhar no mapa* abaixo |
+| **Ctrl+V** | cola no mapa, onde o cursor está: uma imagem, um texto, ou uma seleção do Excalidraw — com formas e setas. Um lote colado chega selecionado: um arrasto o posiciona e **Del** o desfaz |
+| **soltar um arquivo**, ou **☰ → importar diagrama…** | um `.excalidraw` ou um `.mmd` mermaid vira desenhos no mapa — veja *[Importar um diagrama](#importar-um-diagrama)* |
+| **voltar ao conteúdo** | aparece quando você navegou para o papel vazio, sem nada do mapa na tela; desliza de volta para o mapa inteiro |
 | **abas** | `mapa` · `PRD` · `UML` — veja *[Um arquivo, três abas](#um-arquivo-três-abas)*. **Esc** ou **m** volta ao mapa |
 | **isolar esta cadeia** | mostra só o caminho de um endpoint até o banco |
 | **Ctrl+F** ou **/** | busca rotas, tabelas, **colunas**, services, handlers e docs. Um contador mostra os resultados; **Enter** / **Shift+Enter** leva ao próximo / anterior e abre o painel, expandindo o grupo se preciso; **Esc** limpa. Ctrl+F de novo (com a caixa já focada) é o localizar do próprio navegador |
@@ -250,9 +253,14 @@ desenho de três nós não virar cartaz; diagrama que você quer **ler** é na a
 
 ### A aba UML
 
-`.mmd`, `.mermaid` ou `.md` com fonte mermaid dentro. A primeira varredura já deixou o
-`relacoes.mmd` lá; ponha os seus ao lado — peça um diagrama do seu PRD a um LLM, jogue o
-arquivo na mesma pasta, recarregue.
+`.mmd`, `.mermaid` ou `.md` com fonte mermaid dentro, ou um arquivo `.excalidraw`. A
+primeira varredura já deixou o `relacoes.mmd` lá; ponha os seus ao lado — peça um
+diagrama do seu PRD a um LLM, jogue o arquivo na mesma pasta, recarregue.
+
+Um `.excalidraw` é lido pelo mesmo importador de uma colagem do Excalidraw e desenhado
+pelo lápis do próprio mapa (o título é a maior escrita dele). **levar ao mapa**, no
+canto superior direito de todo diagrama, copia-o para o mapa como desenhos comuns — o
+arquivo não muda, e um diagrama mermaid vai com as caixas onde você as arrastou na aba.
 
 **A aba é um palco, não uma página.** O diagrama toma o painel inteiro e ganha zoom e
 pan próprios: **roda** aproxima em torno do cursor, **espaço + arrastar** (ou o botão do
@@ -351,8 +359,12 @@ croqui install --project  # neste repositório, para commitar para o time
 | Codex | `$croqui …` (ou `/prompts:croqui …`) |
 | Gemini CLI | `/croqui …` |
 
-O comando desenha o que você pedir, deste código ou de uma ideia, como um diagrama
-Mermaid na aba UML, na paleta do croqui. Ele foi feito para custar pouco: o modelo lê
+O comando desenha o que você pedir, deste código ou de uma ideia, na aba UML: um
+diagrama Mermaid para uma visão rápida, ou um Excalidraw quando o objetivo é explicar ou
+apresentar — desenhado pelo método que o `croqui design` imprime, adaptado do
+[coleam00/excalidraw-diagram-skill](https://github.com/coleam00/excalidraw-diagram-skill):
+o diagrama argumenta em vez de listar, em três níveis de zoom, com evidência real e cor
+com significado, conferido com `croqui lint` até ficar limpo. Ele foi feito para custar pouco: o modelo lê
 `croqui context --node …` (poucos KB de análise estática, nenhum token gasto procurando
 coisas) em vez de vasculhar o código, abre no máximo três arquivos para o que o mapa não
 responde, e nunca chama `enrich`/`prd` sem você pedir. Depois `croqui build .` gera a
@@ -366,6 +378,7 @@ O diagrama mais barato é o que o modelo não precisa escrever.
 croqui draw "POST /v1/leads"        # o endpoint, sua cadeia até o banco, quem o chama
 croqui draw leads tb_leads --direction TB
 croqui draw                         # uma visão geral, amostrada em 25 nós
+croqui draw "POST /v1/leads" --format excalidraw   # o mesmo, como um diagrama que argumenta
 croqui lint                         # todo diagrama da pasta UML
 ```
 
@@ -377,10 +390,25 @@ que ficou de fora) e marcada com `%% croqui:draw`, então rodar de novo a atuali
 apague essa linha para manter suas edições. Ele nunca toca `relacoes.mmd` nem um
 arquivo que outra pessoa escreveu, a menos que você passe `--force`.
 
+Com `--format excalidraw` ele escreve `<nome>.excalidraw`, montado para argumentar em vez
+de listar: um título sobre o fluxo inteiro numa linha (*API (12) → domínio (1) → dados
+(3)*), uma seção por camada nomeada em texto solto, e dentro de cada uma a evidência que o
+mapa já tem — as colunas reais de uma tabela num bloco de código, os métodos de um
+serviço, o handler e o `arquivo:linha` por trás de um endpoint. Forma e cor têm
+significado (um endpoint é uma elipse na cor do seu verbo, um sistema externo é
+tracejado), as setas ficam ligadas ao que unem e contornam as camadas que pulam, e acima
+de seis endpoints uma visão geral faz um bloco por recurso, listando as requisições. Abre
+no Excalidraw como está, a aba UML o desenha, e colado no mapa ele mantém a paleta do
+croqui. O arquivo leva a marca `croqui:draw` no campo `"source"`, com o mesmo contrato de
+re-execução do Mermaid.
+
 O `lint` reaproveita o parser do visualizador, então aponta o que a aba UML vai
 realmente desenhar: `subgraph`/`end` desbalanceados (erro, sai com 1), tipos de
 diagrama não suportados, classes desconhecidas, mais de 25 nós, setas coladas `A-->B`
-que o visualizador leria como um nó, rótulos longos demais. Um modelo roda isso antes
+que o visualizador leria como um nó, rótulos longos demais. Num `.excalidraw` ele faz a
+passada de defeitos de um ciclo renderizar-e-olhar, sobre a geometria: ids repetidos e
+vínculos quebrados (erros), escrita que não cabe na forma, formas ou texto solto uns
+sobre os outros, setas que param antes do que estão ligadas. Um modelo roda isso antes
 do `croqui build` em vez de iterar sobre uma imagem que não consegue ver. Os dois
 também são ferramentas MCP: `croqui_draw` e `croqui_lint`.
 
@@ -440,12 +468,12 @@ nenhum scanner vai produzir isso um dia. A barra de ferramentas no alto é para 
 Arraste para dimensionar, ou clique uma vez para um padrão razoável. Tudo é desenhado com
 a mesma trepidação com semente do mapa, então o que você acrescenta não parece colado por cima.
 
-- **duplo-clique** é o gesto único de escrever: no papel nu ele solta uma caixa de texto onde você clicou, num desenho ele põe o cursor dentro daquele desenho. Uma caixa de texto cresce para baixo conforme você escreve
+- **duplo-clique** é o gesto único de escrever: no papel nu ele solta uma caixa de texto onde você clicou, num desenho ele põe o cursor dentro daquele desenho — em qualquer ponto dele, até no meio vazio de uma caixa sem fundo. A ferramenta de texto sobre uma caixa de texto existente também a edita, em vez de empilhar uma segunda caixa. Uma caixa de texto cresce para baixo conforme você escreve
 - **arraste a própria escrita** para mover uma caixa de texto, mesmo com o cursor dentro dela — um clique posiciona o cursor, um arrasto move o rótulo
 - uma caixa de texto com **preenchida** desligado é só a escrita: sem fundo, e sem moldura também assim que tem texto dentro (uma vazia mantém um contorno tracejado fraco, ou você nunca a encontraria)
 - **arraste as alças** para redimensionar; setas ganham uma alça por ponta. Solte uma ponta **dentro de uma caixa** — um nó, ou qualquer desenho seu — e ela fica ligada àquela caixa: a ponta encosta na borda e a acompanha para onde ela for. Uma alça cheia é uma ponta ligada; **Ctrl** ao soltar deixa a ponta livre; arrastar a seta inteira solta as duas pontas, e onde ela cair decide de novo
-- **Del** apaga o que estiver selecionado, **Esc** devolve a ferramenta de ponteiro
-- **arraste um canto** e as letras crescem com a caixa, em px — quadrado maior, letra maior, como no Excalidraw. Uma alça **lateral** só muda o formato, que é como você muda onde uma caixa de texto quebra a linha
+- **Del** apaga o que estiver selecionado — um desenho, ou todos os desenhos de uma seleção por retângulo — e **Esc** devolve a ferramenta de ponteiro
+- **arraste um canto** e as letras crescem com a caixa, em px — quadrado maior, letra maior, como no Excalidraw. Uma alça **lateral** muda onde a escrita quebra a linha, e a caixa acompanha as linhas: mais estreita fica mais alta, mais larga fica mais baixa, então o quadro sempre bate com o texto. Qualquer outra forma para de encolher onde a escrita seria cortada
 - **P / M / G / GG** e **A− / A+** no inspetor definem o tamanho das letras, de 8 a 160px — no desenho selecionado, ou, sem nada selecionado, no próximo que você desenhar
 - **fonte**: manuscrita (Virgil), normal ou código, por desenho — as três famílias do Excalidraw. Desenhos novos começam na manuscrita; os feitos antes disso seguem o `✍` como sempre
 - **fundo** nenhum / hachura / sólido, **espessura** fina / média / grossa, **traço** contínuo / tracejado / pontilhado, **traçado** arquiteto / artista / cartunista, **alinhamento** esquerda / centro / direita — o painel de propriedades segue o do Excalidraw, e colar do Excalidraw preserva tudo isso
@@ -495,7 +523,7 @@ tudo com o lápis dele:
 | no Excalidraw | no croqui |
 |---|---|
 | retângulo, losango, elipse | a mesma forma, no mesmo tamanho |
-| seta, linha | seta ou linha, guardando a direção e em que pontas há cabeça — e a que caixa cada ponta estava ligada, quando essa caixa veio na mesma cópia |
+| seta, linha | seta ou linha, guardando a direção e em que pontas há cabeça — e a que caixa cada ponta estava ligada, quando essa caixa veio na mesma cópia. Uma seta curva mantém a curva |
 | texto | uma caixa de texto, no tamanho de fonte que tinha (8–160px), na família correspondente — Virgil/Excalifont como manuscrita, Cascadia/Comic Shanns como código, o resto como normal — e com o alinhamento |
 | rótulo dentro de uma caixa | a escrita da própria caixa — não uma segunda forma por cima dela |
 | rótulo numa seta | uma caixa de texto própria, onde o Excalidraw a tinha (as setas do croqui não guardam texto) |
@@ -511,14 +539,33 @@ se prende a ele como qualquer outro desenho.
 
 Algumas coisas não atravessam, e o aviso diz quais apareceram (*8 desenhos colados —
 fora: 1 embed*): **embeds** e **imagens SVG** — o croqui não tem equivalente para
-eles — e a **seta com cotovelos**, que chega como um traço
-reto entre as duas pontas. A **rotação** também se perde: um retângulo inclinado entra
+eles — e a **seta com cotovelos**, que chega como uma curva
+em volta do mesmo canto. A **rotação** também se perde: um retângulo inclinado entra
 reto. Imagens precisam do `croqui serve` (vão para o disco); num `croqui.html` só de
 leitura o resto da cópia cola normalmente e o aviso diz que as imagens ficaram de fora.
 
 Colar com o cursor dentro de uma caixa de texto funciona como você espera: texto puro
 entra no cursor, e uma cópia do Excalidraw entra como o que está escrito nela, não como
 JSON.
+
+O lote chega selecionado e contornado, então uma segunda colagem por cima da primeira
+nunca passa despercebida. Uma cópia que lista o mesmo elemento duas vezes é colada uma
+vez só. E no Linux, onde o clique do meio cola a última coisa selecionada, navegar com o
+botão do meio não solta outra cópia no mapa.
+
+### Importar um diagrama
+
+Um diagrama inteiro chega ao mapa de três jeitos: **soltando o arquivo** no mapa, por
+**☰ → importar diagrama…**, ou por **levar ao mapa** na aba UML. Um `.excalidraw` passa
+pelo mesmo importador de uma colagem; um `.mmd` mermaid (ou o primeiro bloco mermaid de um
+`.md`) é disposto como a aba UML o dispõe e vira desenhos — nós nas suas formas e cores da
+paleta, subgraphs como molduras, o título como cabeçalho, setas ligadas às caixas que unem
+e em arco em volta das caixas no caminho, e o rótulo de cada aresta ao lado da seta.
+
+Ele cai onde você está olhando quando há espaço, senão no papel livre abaixo do mapa,
+nunca em cima das caixas; fica no papel em vez de se prender aos nós que atravessa; e chega
+selecionado, com a câmera nele, então um arrasto o põe onde você quiser. Um passo de
+desfazer tira tudo de volta.
 
 ### Relações que você desenha
 

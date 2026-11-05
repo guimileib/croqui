@@ -1,4 +1,4 @@
-"""``croqui lint``: check a Mermaid file against what the viewer actually draws.
+"""``croqui lint``: check a Mermaid or Excalidraw file against what the viewer draws.
 
 ``viewer/diagram.js`` is forgiving on purpose — a line it cannot read is skipped, a
 class it does not know is painted nothing — so a diagram that "loads" can still be
@@ -8,6 +8,11 @@ and says, in a line per problem, what the picture will be missing. It is static 
 free, so a model can run it before ``croqui build`` instead of iterating by eye.
 
 Keep this in step with ``diagram.js``: it is a mirror, not a Mermaid validator.
+
+An ``.excalidraw`` file gets the defect pass of a render-and-look loop, done on the
+geometry instead of on a picture: broken bindings, writing that does not fit its
+box, shapes and text on top of each other, arrows that stop short of what they
+point at. See ``lint_excalidraw``.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ from pathlib import Path
 from .docs import SKIP_DIRS, section_dirs
 from .scaffold import MARKER, MARKER_WINDOW
 
-SUFFIXES = (".mmd", ".mermaid")
+SUFFIXES = (".mmd", ".mermaid", ".excalidraw")
 MAX_NODES = 25
 MAX_WORDS = 6
 
@@ -362,6 +367,199 @@ def lint_text(text: str, file: str = "<texto>") -> list[Issue]:
     return sorted(rep.issues, key=lambda i: i.line)
 
 
+# ------------------------------------------------------------------ excalidraw
+
+# Average advance of a character, in font sizes, per Excalidraw font number: the
+# monospaced ones (3 Cascadia, 8 Comic Shanns) are exact, the rest a fair average.
+FONT_ADVANCE = {3: 0.6, 8: 0.6}
+DEFAULT_ADVANCE = 0.55
+SHAPES = {"rectangle", "ellipse", "diamond", "image", "embeddable", "iframe"}
+MAX_ELEMENTS = 300
+MIN_FONT = 12
+ARROW_REACH = 45       # how far, in px, a bound arrow may stop from its element
+
+
+def _box(el: dict) -> tuple[float, float, float, float]:
+    """x1, y1, x2, y2 — an arrow's from its points, everything else from its size."""
+    x, y = _num(el.get("x")), _num(el.get("y"))
+    pts = el.get("points") if el.get("type") in ("arrow", "line", "freedraw") else None
+    if isinstance(pts, list) and pts:
+        xs = [x + _num(p[0]) for p in pts if isinstance(p, list) and len(p) >= 2]
+        ys = [y + _num(p[1]) for p in pts if isinstance(p, list) and len(p) >= 2]
+        if xs:
+            return min(xs), min(ys), max(xs), max(ys)
+    w, h = _num(el.get("width")), _num(el.get("height"))
+    return min(x, x + w), min(y, y + h), max(x, x + w), max(y, y + h)
+
+
+def _num(value: object) -> float:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0.0
+
+
+def _meets(a: tuple, b: tuple, slack: float = 0.0) -> bool:
+    return a[0] < b[2] - slack and b[0] < a[2] - slack and a[1] < b[3] - slack and b[1] < a[3] - slack
+
+
+def _inside(a: tuple, b: tuple, slack: float = 2.0) -> bool:
+    return a[0] >= b[0] - slack and a[1] >= b[1] - slack and a[2] <= b[2] + slack and a[3] <= b[3] + slack
+
+
+def _name(el: dict) -> str:
+    """How an element is called in a message: its writing if it has any, else its id."""
+    text = str(el.get("originalText") or el.get("text") or el.get("name") or "").strip().split("\n")[0]
+    return f"`{text[:30]}`" if text else f"{el.get('type')} `{el.get('id')}`"
+
+
+def _lines_needed(text: str, size: float, advance: float, room: float) -> tuple[int, float]:
+    """(lines, widest word) for ``text`` wrapped to ``room`` px, as Excalidraw wraps it."""
+    lines, widest = 0, 0.0
+    for raw in str(text).split("\n"):
+        lines += 1
+        run = 0.0
+        for word in raw.split(" "):
+            w = len(word) * size * advance
+            widest = max(widest, w)
+            step = (size * advance if run else 0.0) + w
+            if run and run + step > room:
+                lines += 1
+                run = w
+            else:
+                run += step
+    return lines, widest
+
+
+def lint_excalidraw(text: str, file: str = "<texto>") -> list[Issue]:
+    """Every problem in one .excalidraw file, in line order."""
+    rep = _Report(file)
+    try:
+        doc = json.loads(text)
+    except json.JSONDecodeError as exc:
+        rep.add(exc.lineno, ERROR, f"JSON inválido: {exc.msg}")
+        return rep.issues
+    if not isinstance(doc, dict) or doc.get("type") not in ("excalidraw", "excalidraw/clipboard"):
+        rep.add(1, ERROR, "não é um arquivo do Excalidraw (falta `\"type\": \"excalidraw\"`)")
+        return rep.issues
+    elements = doc.get("elements")
+    if not isinstance(elements, list) or not elements:
+        rep.add(1, ERROR, "sem elementos — nada para desenhar")
+        return rep.issues
+
+    line_of: dict[str, int] = {}
+    for number, raw in enumerate(text.split("\n"), start=1):
+        for found in re.finditer(r'"id"\s*:\s*"([^"]+)"', raw):
+            line_of.setdefault(found.group(1), number)
+
+    live = [el for el in elements if isinstance(el, dict) and not el.get("isDeleted")]
+    counts: dict[str, int] = {}
+    for el in live:
+        if not isinstance(el.get("id"), str) or not isinstance(el.get("type"), str):
+            rep.add(1, ERROR, "elemento sem `id` ou sem `type`")
+            continue
+        counts[el["id"]] = counts.get(el["id"], 0) + 1
+    for eid, n in counts.items():
+        if n > 1:
+            rep.add(line_of.get(eid, 1), ERROR,
+                    f"id `{eid}` aparece {n} vezes — colado, cada cópia vira um desenho a mais")
+    by_id = {el["id"]: el for el in live if isinstance(el.get("id"), str)}
+
+    def at(el: dict) -> int:
+        return line_of.get(str(el.get("id")), 1)
+
+    def lists(holder: dict, eid: str) -> bool:
+        return any(isinstance(b, dict) and b.get("id") == eid for b in holder.get("boundElements") or [])
+
+    small = faint = 0
+    for el in live:
+        kind = el.get("type")
+        for ref in el.get("boundElements") or []:
+            if isinstance(ref, dict) and ref.get("id") not in by_id:
+                rep.add(at(el), WARNING, f"{_name(el)} lista `{ref.get('id')}`, que não existe")
+        if el.get("opacity", 100) != 100:
+            faint += 1
+        if kind == "text":
+            if _num(el.get("fontSize")) and _num(el.get("fontSize")) < MIN_FONT:
+                small += 1
+            host_id = el.get("containerId")
+            if host_id:
+                host = by_id.get(host_id)
+                if host is None:
+                    rep.add(at(el), ERROR, f"o texto {_name(el)} está preso a `{host_id}`, que não existe")
+                    continue
+                if not lists(host, el["id"]):
+                    rep.add(at(el), WARNING, f"{_name(host)} não lista o texto {_name(el)} em boundElements")
+                if host.get("type") in ("rectangle", "ellipse", "diamond"):
+                    _fits(rep, at(el), el, host)
+        if kind == "arrow":
+            for end in ("startBinding", "endBinding"):
+                bind = el.get(end)
+                if not isinstance(bind, dict):
+                    continue
+                target = by_id.get(bind.get("elementId"))
+                if target is None:
+                    rep.add(at(el), ERROR, f"a seta {_name(el)} está presa a `{bind.get('elementId')}`, que não existe")
+                    continue
+                if not lists(target, el["id"]):
+                    rep.add(at(el), WARNING, f"{_name(target)} não lista a seta `{el['id']}` em boundElements")
+                pts = el.get("points") or []
+                if pts and isinstance(pts[0], list):
+                    p = pts[0] if end == "startBinding" else pts[-1]
+                    px, py = _num(el.get("x")) + _num(p[0]), _num(el.get("y")) + _num(p[1])
+                    x1, y1, x2, y2 = _box(target)
+                    gap = max(x1 - px, 0, px - x2) ** 2 + max(y1 - py, 0, py - y2) ** 2
+                    if gap > ARROW_REACH ** 2:
+                        rep.add(at(el), WARNING, f"a seta `{el['id']}` para a {int(gap ** 0.5)}px de "
+                                                 f"{_name(target)}, a que está presa")
+    if small:
+        rep.add(1, INFO, f"{small} texto(s) com menos de {MIN_FONT}px — difíceis de ler no tamanho exportado")
+    if faint:
+        rep.add(1, INFO, f"{faint} elemento(s) com opacidade abaixo de 100 — use cor e espessura para hierarquia")
+    if len(live) > MAX_ELEMENTS:
+        rep.add(1, INFO, f"{len(live)} elementos — grande para um diagrama só; divida em seções ou arquivos")
+        return sorted(rep.issues, key=lambda i: i.line)
+    _overlaps(rep, live, by_id, at)
+    return sorted(rep.issues, key=lambda i: i.line)
+
+
+def _fits(rep: _Report, line: int, text: dict, host: dict) -> None:
+    """Writing bound to a shape fits inside it: Excalidraw wraps it to the shape's
+    width but does not grow the shape on open, so what does not fit spills out."""
+    size = _num(text.get("fontSize")) or 20
+    advance = FONT_ADVANCE.get(int(_num(text.get("fontFamily"))), DEFAULT_ADVANCE)
+    w, h = abs(_num(host.get("width"))), abs(_num(host.get("height")))
+    inner = {"ellipse": 0.707, "diamond": 0.5}.get(str(host.get("type")), 1.0)
+    room_w, room_h = w * inner - 10, h * inner - 10
+    lines, widest = _lines_needed(str(text.get("originalText") or text.get("text") or ""), size, advance, room_w)
+    need = lines * size * (_num(text.get("lineHeight")) or 1.25)
+    if widest > room_w + 1:
+        rep.add(line, WARNING, f"uma palavra de {_name(text)} é mais larga que {_name(host)} "
+                               f"(~{int(widest)}px, cabem {int(room_w)}) — alargue a forma")
+    elif need > room_h + 1:
+        rep.add(line, WARNING, f"o texto {_name(text)} não cabe em {_name(host)}: precisa de ~{int(need)}px "
+                               f"de altura, tem {int(room_h)} — aumente a forma ou encurte o texto")
+
+
+def _overlaps(rep: _Report, live: list[dict], by_id: dict, at) -> None:
+    """Shapes on top of shapes, and loose text on top of anything, unless one sits
+    wholly inside the other — a label in its box, a dot on its line, a block of
+    code on its card are all deliberate."""
+    shapes = [el for el in live if el.get("type") in SHAPES]
+    loose = [el for el in live if el.get("type") == "text" and not el.get("containerId")]
+    boxes = {el["id"]: _box(el) for el in shapes + loose if isinstance(el.get("id"), str)}
+
+    def clash(a: dict, b: dict) -> bool:
+        ba, bb = boxes[a["id"]], boxes[b["id"]]
+        return _meets(ba, bb, 1.0) and not _inside(ba, bb) and not _inside(bb, ba)
+
+    for i, a in enumerate(shapes):
+        for b in shapes[i + 1:]:
+            if clash(a, b):
+                rep.add(at(b), WARNING, f"{_name(a)} e {_name(b)} se sobrepõem")
+    for i, t in enumerate(loose):
+        for other in loose[i + 1:] + shapes:
+            if clash(t, other):
+                rep.add(at(t), WARNING, f"o texto {_name(t)} está por cima de {_name(other)}")
+
+
 # ------------------------------------------------------------------------ files
 
 
@@ -412,7 +610,8 @@ def lint_paths(root: Path, files: list[str] | None = None) -> tuple[list[Issue],
         if is_generated(text):
             continue
         checked += 1
-        issues.extend(lint_text(text, _shown(path, root)))
+        check = lint_excalidraw if path.suffix.lower() == ".excalidraw" else lint_text
+        issues.extend(check(text, _shown(path, root)))
     return issues, checked
 
 

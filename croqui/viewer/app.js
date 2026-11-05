@@ -71,6 +71,7 @@
    * `isTextual` is what the drawing code branches on rather than the type. */
   var MAX_PASTE = 520;       // longest edge of a freshly pasted image, in scene units
   var MAX_PASTE_MB = 12;     // must match MAX_IMAGE_BYTES in serve.py
+  var MAX_IMPORT_MB = 25;    // a diagram file bigger than this is not a diagram
   // Mirrors IMAGE_TYPES in model.py — refusing here means a clear message instead
   // of a 415 from the server.
   var IMAGE_MIME = { "image/png": 1, "image/jpeg": 1, "image/gif": 1, "image/webp": 1 };
@@ -99,6 +100,7 @@
     image: ["imagem", "imagens"],
     embeddable: ["embed", "embeds"],
     iframe: ["iframe", "iframes"],
+    loop: ["laço", "laços"],
   };
   var PASTE_TEXT_W = 320;      // where pasted writing wraps, in scene units
   var PASTE_TEXT_MAX_W = 640;  // ceiling on that, so wide writing is not a ribbon
@@ -389,13 +391,16 @@
       "M" + (x + Math.cos(a + 0.42) * size) + "," + (y + Math.sin(a + 0.42) * size) + "L" + x + "," + y;
   }
 
-  /** A drawn-by-hand stroke between two points, with heads at neither/one/both. */
-  function sketchArrow(x1, y1, x2, y2, seed, heads, rough) {
+  /** A drawn-by-hand stroke between two points, with heads at neither/one/both.
+   *  `bend` arcs it on purpose — the control point is pushed sideways by that
+   *  fraction of its length — so an arrow can go round a box instead of through
+   *  it; without one the only curve is the pencil's own slight sag. */
+  function sketchArrow(x1, y1, x2, y2, seed, heads, rough, bend) {
     rough = rough == null ? 1 : rough;
     var dx = x2 - x1, dy = y2 - y1;
     var len = Math.hypot(dx, dy) || 1;
     var nx = -dy / len, ny = dx / len;
-    var bow = (seeded(seed)() - 0.5) * Math.min(15, len * 0.09) * rough;
+    var bow = bend ? bend * len : (seeded(seed)() - 0.5) * Math.min(15, len * 0.09) * rough;
     var mx = (x1 + x2) / 2 + nx * bow, my = (y1 + y2) / 2 + ny * bow;
     var d = "";
     for (var p = 0; p < 2; p++) {
@@ -547,6 +552,8 @@
    */
   function imageHref(src) {
     if (!src) return null;
+    // An .excalidraw file on the UML tab carries its pictures inline.
+    if (/^data:image\//.test(src)) return src;
     if (state.images && state.images[src]) return state.images[src];
     return "images/" + encodeURIComponent(src);
   }
@@ -1678,6 +1685,7 @@
     refreshMarks();
     state.after.forEach(function (fn) { fn(); });
     state.after = [];
+    syncLost();
   }
 
   /* ----------------------------------------------------------- user drawings */
@@ -1739,7 +1747,7 @@
 
     if (isLinear(s)) {
       var d = sketchArrow(0, 0, s.w, s.h, hashCode(s.id), s.type === "arrow" ? (s.heads || "end") : "none",
-        inkAmp(s, 1));
+        inkAmp(s, 1), s.bend);
       // A 2px stroke is impossible to grab; a fat invisible twin is not.
       refs.hit = svgEl("path", { class: "hit", d: d, fill: "none", stroke: "transparent", "stroke-width": 16 });
       refs.ink = svgEl("path", {
@@ -1869,7 +1877,6 @@
    * click-through until you double-click it. Swapping elements on every edit
    * would mean fighting focus; this way the caret lands and stays. */
   function textEditor(s, box, paint, refs) {
-    var pad = s.type === "text" ? 8 : 11;
     var editing = state.editing === s.id;
     // A frame's name reads like a caption, from the left, above the frame.
     var centred = s.type !== "text" && s.type !== "frame";
@@ -1903,11 +1910,14 @@
     }
 
     // Typing past the bottom of a text box grows it rather than hiding the text.
+    // Measured with the box collapsed: the textarea's scrollHeight at full height
+    // is never less than the box itself, so reading it there grew the box a little
+    // on every keystroke, writing or not.
     function grow() {
       if (s.type !== "text") return;
-      var need = ta.scrollHeight + pad * 2 + 2;
-      if (need <= s.h) return;
-      s.h = Math.ceil(need);
+      var need = writingHeight(s);
+      if (!need || need <= s.h) return;
+      s.h = need;
       applyShapeGeometry(s);
       renderOverlay();
     }
@@ -1953,6 +1963,23 @@
     return { fo: fo, ta: ta, centre: centre, grow: grow };
   }
 
+  /** How tall a drawing has to be to show all of its writing at its current width.
+   *  Same trick as `centre`: collapsed for an instant, a textarea's scrollHeight
+   *  is the text alone. 0 when the drawing has no text box on screen. */
+  function writingHeight(s) {
+    var refs = state.shapeEls[s.id];
+    if (!refs || !refs.editor) return 0;
+    var ta = refs.editor.ta;
+    var top = ta.style.paddingTop, height = ta.style.height;
+    ta.style.paddingTop = "0px";
+    ta.style.height = "0px";
+    var need = ta.scrollHeight;
+    ta.style.paddingTop = top;
+    ta.style.height = height;
+    var pad = s.type === "text" ? 8 : 11;
+    return need ? Math.ceil(need + pad * 2 + 2) : 0;
+  }
+
   /** Repaint one shape in place — used while dragging, resizing and typing. */
   function applyShapeGeometry(s) {
     var refs = state.shapeEls[s.id];
@@ -1974,7 +2001,7 @@
     }
     if (isLinear(s)) {
       var d = sketchArrow(0, 0, s.w, s.h, hashCode(s.id), s.type === "arrow" ? (s.heads || "end") : "none",
-        inkAmp(s, 1));
+        inkAmp(s, 1), s.bend);
       refs.ink.setAttribute("d", d);
       refs.hit.setAttribute("d", d);
       return;
@@ -2058,6 +2085,7 @@
         width: hint.w + 6 / k, height: hint.h + 6 / k, rx: 4 / k, "stroke-width": 1.2 / k,
       }));
     }
+    drawMarks(k);
     var s = state.tool === "select" ? selectedShape() : null;
     if (!s) return;
     var r = 4.5 / k;
@@ -2085,13 +2113,88 @@
     });
   }
 
+  /**
+   * An outline around every picked item, and one around the lot, as Excalidraw
+   * draws a selection. Thickening the ink alone was not enough: a bare text box
+   * has no ink to thicken, so a sweep over a label looked like it picked nothing.
+   * While the sweep is still growing it shows what letting go would pick.
+   */
+  function drawMarks(k) {
+    var nodes = state.preview ? state.preview.nodes : state.marked;
+    var drawn = state.preview ? state.preview.drawn : state.markedShapes;
+    // `boxes` is the extent of everything picked; `outlined` the ones framed.
+    var boxes = [], outlined = [];
+    Object.keys(nodes).forEach(function (id) {
+      if (state.boxes[id]) { boxes.push(state.boxes[id]); outlined.push(state.boxes[id]); }
+    });
+    shapes().forEach(function (s) {
+      if (!drawn[s.id]) return;
+      var b = shapeBox(s);
+      var refs = state.shapeEls && state.shapeEls[s.id];
+      boxes.push(b);
+      // A line's box is mostly empty paper — a diagonal arrow would get a frame
+      // the size of the gap it spans. Its own stroke is traced instead.
+      if (isLinear(s) && refs && refs.ink) {
+        el.overlay.appendChild(svgEl("path", {
+          class: "markline", d: refs.ink.getAttribute("d"), fill: "none",
+          transform: "translate(" + s.x + "," + s.y + ")", "stroke-width": 5 / k,
+        }));
+      } else {
+        outlined.push(b);
+      }
+    });
+    if (!boxes.length) return;
+    var gap = 4 / k;
+    outlined.forEach(function (b) {
+      el.overlay.appendChild(svgEl("rect", {
+        class: "markbox", x: b.x - gap, y: b.y - gap,
+        width: Math.max(1, b.w) + gap * 2, height: Math.max(1, b.h) + gap * 2,
+        rx: 3 / k, "stroke-width": 1.4 / k,
+      }));
+    });
+    if (boxes.length < 2) return;
+    var all = boundsOf(boxes);
+    var out = 10 / k;
+    el.overlay.appendChild(svgEl("rect", {
+      class: "markall", x: all.minX - out, y: all.minY - out,
+      width: all.maxX - all.minX + out * 2, height: all.maxY - all.minY + out * 2,
+      "stroke-width": 1 / k, "stroke-dasharray": 5 / k + " " + 4 / k,
+    }));
+  }
+
   function addShape(type, x, y, w, h, opts) {
     opts = opts || {};
     // A batched call is one of many inside a single paste: the caller owns the
     // history entry and the one render at the end of it.
     if (!opts.batch) pushHistory();
+    var s = makeShape(type, x, y, w, h, opts);
+    // A drawing dropped on a node is about that node, so it travels with it —
+    // through a drag, through a re-layout, and through the next re-scan.
+    // An arrow drawn from one box to another holds on to them by its ends
+    // instead; `snap` is the drawing tool saying it was drawn by hand.
+    var tied = isLinear(s) && !!opts.snap && settleEnds(s, "ab", false, false);
+    // An imported diagram is a picture of its own, not notes on the boxes it
+    // happens to land over: `free` keeps it on the paper.
+    var host = tied || opts.free ? null : hostFor(shapeBox(s));
+    if (host) anchorTo(s, host);
+    shapes().push(s);
+    if (opts.batch) return s;
+    // With the lock on you are drawing a series: nothing gets picked up between them.
+    state.sel = state.lock && !opts.edit && state.tool !== "select" ? null : { kind: "shape", id: s.id };
+    state.editing = opts.edit ? s.id : null;
+    markDirty();
+    render();
+    refreshInspector();
+    if (host) toast("preso a " + nodeName(host) + " — segue o nó");
+    return s;
+  }
+
+  /** A drawing as it is stored, with the pencil's defaults filled in — not yet on
+   *  the map. The UML tab draws an .excalidraw file from these without adding any. */
+  function makeShape(type, x, y, w, h, opts) {
+    opts = opts || {};
     var s = {
-      id: "sh-" + Date.now().toString(36) + "-" + state.seq++,
+      id: opts.id || "sh-" + Date.now().toString(36) + "-" + state.seq++,
       type: type, x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h),
       text: "",
       // The pencil in the rail is the default; a paste brings its own styling and
@@ -2108,6 +2211,7 @@
     if (s.rough === 1) delete s.rough;
     if (isLinear(s)) {
       s.heads = opts.heads || (type === "arrow" ? state.style.heads : "none");
+      if (opts.bend) s.bend = opts.bend;
       delete s.fill;
       delete s.text;
     } else if (isImage(s)) {
@@ -2144,22 +2248,6 @@
       });
     }
     if (opts.front) s.front = true;
-    // A drawing dropped on a node is about that node, so it travels with it —
-    // through a drag, through a re-layout, and through the next re-scan.
-    // An arrow drawn from one box to another holds on to them by its ends
-    // instead; `snap` is the drawing tool saying it was drawn by hand.
-    var tied = isLinear(s) && !!opts.snap && settleEnds(s, "ab", false, false);
-    var host = tied ? null : hostFor(shapeBox(s));
-    if (host) anchorTo(s, host);
-    shapes().push(s);
-    if (opts.batch) return s;
-    // With the lock on you are drawing a series: nothing gets picked up between them.
-    state.sel = state.lock && !opts.edit && state.tool !== "select" ? null : { kind: "shape", id: s.id };
-    state.editing = opts.edit ? s.id : null;
-    markDirty();
-    render();
-    refreshInspector();
-    if (host) toast("preso a " + nodeName(host) + " — segue o nó");
     return s;
   }
 
@@ -2233,6 +2321,26 @@
     markDirty();
     render();
     refreshInspector();
+  }
+
+  /** Del on a sweep: the drawings in it go, in one undo step. The boxes stay — they
+   *  are the code's, and a selection of them is only a way to move them. */
+  function deleteMarked() {
+    var ids = markedShapeIds();
+    if (!ids.length) return;
+    pushHistory();
+    ids.forEach(function (id) {
+      releaseEndsOn(id);
+      var list = shapes();
+      var i = list.findIndex(function (s) { return s.id === id; });
+      if (i >= 0) list.splice(i, 1);
+    });
+    state.markedShapes = {};
+    state.editing = null;
+    markDirty();
+    render();
+    refreshInspector();
+    toast(ids.length + (ids.length > 1 ? " desenhos apagados" : " desenho apagado") + " — Ctrl+Z desfaz");
   }
 
   /** Ctrl+D: the selected drawing again, a step down and to the right, selected. */
@@ -2667,6 +2775,7 @@
     // Handles are drawn in scene units but must stay one size on screen.
     renderOverlay();
     rememberView();
+    syncLost();
   }
 
   /** Zoom about the middle of the screen — the − / + buttons and keys. */
@@ -2704,21 +2813,41 @@
     el.canvas.style.backgroundPosition = px(state.view.x) + " " + px(state.view.y);
   }
 
-  function fitToView() {
-    var ids = Object.keys(state.boxes);
-    var drawings = shapes();
-    if (!ids.length && !drawings.length) return;
-    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    ids.forEach(function (id) {
+  /** Everything on the paper, boxes and drawings alike, as one box per item. */
+  function contentBoxes() {
+    var list = Object.keys(state.boxes).map(function (id) {
       var b = state.boxes[id];
-      minX = Math.min(minX, b.x); minY = Math.min(minY, b.y - 52);
-      maxX = Math.max(maxX, b.x + b.w); maxY = Math.max(maxY, b.y + b.h);
+      // A group's heading sits above its box.
+      return { x: b.x, y: b.y - 52, w: b.w, h: b.h + 52 };
     });
-    drawings.forEach(function (s) {
-      var b = shapeBox(s);
-      minX = Math.min(minX, b.x); minY = Math.min(minY, b.y);
-      maxX = Math.max(maxX, b.x + b.w); maxY = Math.max(maxY, b.y + b.h);
+    shapes().forEach(function (s) { list.push(shapeBox(s)); });
+    return list;
+  }
+
+  /** The extent of a list of boxes, or null when there are none. */
+  function boundsOf(list) {
+    if (!list.length) return null;
+    var out = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+    list.forEach(function (b) {
+      out.minX = Math.min(out.minX, b.x); out.minY = Math.min(out.minY, b.y);
+      out.maxX = Math.max(out.maxX, b.x + b.w); out.maxY = Math.max(out.maxY, b.y + b.h);
     });
+    return out;
+  }
+
+  function fitToView() {
+    var b = boundsOf(contentBoxes());
+    if (!b) return;
+    var to = framing(b);
+    state.view.k = to.k;
+    state.view.x = to.x;
+    state.view.y = to.y;
+    applyView();
+  }
+
+  /** The camera that shows a scene rectangle whole, clear of the chrome around it. */
+  function framing(b) {
+    var minX = b.minX, minY = b.minY, maxX = b.maxX, maxY = b.maxY;
     var pad = 56;
     // Keep the map clear of the tool rail — but only while the rail is the tall
     // one on the left; on a short window it lies flat along the bottom.
@@ -2732,10 +2861,56 @@
     var raw = Math.min(vw / (maxX - minX + pad * 2), vh / (maxY - minY + pad * 2));
     // Never shrink past readability — pan instead of squinting.
     var k = Math.min(1.15, Math.max(0.4, raw));
-    state.view.k = k;
-    state.view.x = rail + Math.max(pad, (vw - (maxX - minX) * k) / 2) - minX * k;
-    state.view.y = 74 + Math.max(0, (vh - (maxY - minY) * k) / 2) - minY * k;
-    applyView();
+    return {
+      k: k,
+      x: rail + Math.max(pad, (vw - (maxX - minX) * k) / 2) - minX * k,
+      y: 74 + Math.max(0, (vh - (maxY - minY) * k) / 2) - minY * k,
+    };
+  }
+
+  /** Glide the camera to `to` rather than jump: a jump from empty paper back to
+   *  the map loses you a second time, because you never see where you came from. */
+  function glideTo(to) {
+    var from = { x: state.view.x, y: state.view.y, k: state.view.k };
+    var start = 0, span = 320;
+    if (state.glide) cancelAnimationFrame(state.glide);
+    function step(now) {
+      if (!start) start = now;
+      var t = Math.min(1, (now - start) / span);
+      var e = 1 - Math.pow(1 - t, 3);
+      state.view.k = from.k + (to.k - from.k) * e;
+      state.view.x = from.x + (to.x - from.x) * e;
+      state.view.y = from.y + (to.y - from.y) * e;
+      applyView();
+      state.glide = t < 1 ? requestAnimationFrame(step) : 0;
+    }
+    state.glide = requestAnimationFrame(step);
+  }
+
+  /* Panned off into empty paper, Excalidraw offers the way back, and so does this.
+   * The button shows only while nothing at all is on screen: a corner of a box in
+   * view is already enough to find your way, and a button that appears every time
+   * the map is half off-screen would just be noise. */
+  function syncLost() {
+    if (!el.lost || !el.canvas) return;
+    var lost = false;
+    if (state.tab === "map") {
+      var k = state.view.k || 1;
+      var view = {
+        x: -state.view.x / k, y: -state.view.y / k,
+        w: el.canvas.clientWidth / k, h: el.canvas.clientHeight / k,
+      };
+      var items = contentBoxes();
+      lost = items.length > 0 && !items.some(function (b) {
+        return overlaps(view, { x: b.x, y: b.y, w: Math.max(1, b.w), h: Math.max(1, b.h) });
+      });
+    }
+    el.lost.hidden = !lost;
+  }
+
+  function backToContent() {
+    var b = boundsOf(contentBoxes());
+    if (b) glideTo(framing(b));
   }
 
   function screenToScene(cx, cy) {
@@ -2924,6 +3099,7 @@
       var refs = state.shapeEls[id];
       if (refs && refs.g) refs.g.classList.toggle("marked", !!state.markedShapes[id]);
     });
+    renderOverlay();
     var n = marks().length, d = markedShapeIds().length;
     if (!el.marked) return;
     el.marked.hidden = !n && !d;
@@ -3253,6 +3429,33 @@
     return target && target.closest ? target.closest(selector) : null;
   }
 
+  /**
+   * The drawing that would take writing at a scene point, front-most first.
+   *
+   * Geometry rather than the DOM, for the shapes the DOM cannot see there: an
+   * unfilled box is grabbed by its ink, so its inside is paper to the pointer. A
+   * frame is left out — the inside of a frame is room for new writing, and its
+   * name is edited by double-clicking the name itself.
+   */
+  function writableAt(x, y, textOnly) {
+    var order = shapes().filter(function (s) { return s.front; }).reverse()
+      .concat(shapes().filter(function (s) { return !s.front; }).reverse());
+    for (var i = 0; i < order.length; i++) {
+      var s = order[i];
+      if (noText(s) || s.type === "frame" || (textOnly && s.type !== "text")) continue;
+      if (x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h) return s;
+    }
+    return null;
+  }
+
+  /** Put the caret in a drawing's writing, selected, as a double-click does. */
+  function editShape(id) {
+    state.sel = { kind: "shape", id: id };
+    state.editing = id;
+    render();
+    refreshInspector();
+  }
+
   function wireCanvas() {
     var drag = null;
 
@@ -3297,6 +3500,13 @@
         return;
       }
       if (state.tool === "link") { drag = startLink(ev); return; }
+      // The text tool on a text box that is already there edits it, like Excalidraw's,
+      // rather than stacking a second box on top. Only a text box: inside a big
+      // rectangle drawn as a zone, the text tool is how a loose label goes in.
+      // Done on release: the press would otherwise take the focus straight back
+      // off the caret it just placed.
+      var into = state.tool === "text" ? writableAt(pos.x, pos.y, true) : null;
+      if (into) { drag = { kind: "write", id: into.id }; return; }
       if (state.tool !== "select") {
         drag = { kind: "draw", type: state.tool, sx: pos.x, sy: pos.y, ex: pos.x, ey: pos.y, moved: false };
         return;
@@ -3443,6 +3653,7 @@
       }
       if (drag.kind === "erase") { eraseAt(drag, pos); return; }
       if (drag.kind === "laser") { laserAt(pos); return; }
+      if (drag.kind === "write") return;
       if (drag.kind === "draw") {
         drag.ex = pos.x;
         drag.ey = pos.y;
@@ -3498,6 +3709,8 @@
         redrawEdgesFor(id);
       });
       if (drag.shapes) moveGangShapes(drag, byX, byY);
+      // The selection outlines ride along with the boxes they surround.
+      else if (drag.ids.length > 1 || state.marked[drag.id]) renderOverlay();
       positionChrome();
     });
 
@@ -3507,6 +3720,11 @@
       var done = drag;
       drag = null;
 
+      if (done.kind === "write") {
+        if (!state.lock) setTool("select");
+        editShape(done.id);
+        return;
+      }
       if (done.kind === "draw") { commitDraw(done, ev); return; }
       if (done.kind === "pencil") { commitPencil(done); return; }
       if (done.kind === "erase") { commitErase(done); return; }
@@ -3561,20 +3779,24 @@
      * that drawing's text, on bare paper it makes a new text box right where you
      * clicked. Nothing else on the canvas answers to a double-click, which is why
      * it can carry the gesture without a modifier. */
+    /* The event's own target cannot be trusted here: the canvas holds the pointer
+     * capture, so the click — and the double-click built from it — lands on the
+     * canvas itself. Asking the page what is under the pointer is what finds the
+     * text box you double-clicked instead of making a second one on top of it. */
     el.canvas.addEventListener("dblclick", function (ev) {
-      var sg = ev.target.closest ? ev.target.closest(".shape") : null;
-      if (sg) {
-        var id = sg.getAttribute("data-shape");
-        var shape = findBy(shapes(), id);
-        if (shape && !noText(shape)) {
-          state.sel = { kind: "shape", id: id };
-          state.editing = id;
-          render();
-          refreshInspector();
-        }
+      var pos = screenToScene(ev.clientX, ev.clientY);
+      var sg = hitAt(ev.clientX, ev.clientY, ".shape");
+      var shape = sg ? findBy(shapes(), sg.getAttribute("data-shape")) : null;
+      var node = hitAt(ev.clientX, ev.clientY, ".node");
+      // An unfilled shape is only ink to the pointer, so a double-click in its
+      // middle reaches the paper; it still means "write in this shape".
+      if (!shape && !node) shape = writableAt(pos.x, pos.y);
+      if (shape) {
+        // Already writing in it: a double-click there picks a word, as in any text.
+        if (!noText(shape) && state.editing !== shape.id) editShape(shape.id);
         return;
       }
-      var lg = ev.target.closest ? ev.target.closest("[data-link]") : null;
+      var lg = hitAt(ev.clientX, ev.clientY, "[data-link]");
       if (lg) {
         pick("link", lg.getAttribute("data-link"));
         if (el.insLabel) el.insLabel.focus();
@@ -3582,12 +3804,10 @@
       }
       // A node and the collapse caret are not bare paper — a text box dropped on
       // top of the box you were double-clicking is never what you meant.
-      if (ev.target.closest && ev.target.closest(".node")) return;
-      if (ev.target.getAttribute && ev.target.getAttribute("data-collapse")) return;
+      if (node || hitAt(ev.clientX, ev.clientY, "[data-collapse]")) return;
       // With a shape tool armed, a drag is a drawing and a click already made one;
       // only the two tools that mean "write" answer here.
       if (state.tool !== "select" && state.tool !== "text") return;
-      var pos = screenToScene(ev.clientX, ev.clientY);
       var size = DEFAULT_SIZE.text;
       addShape("text", pos.x - size[0] / 2, pos.y - size[1] / 2, size[0], size[1], { edit: true });
     });
@@ -3806,6 +4026,26 @@
     };
   }
 
+  /** The points an Excalidraw arrow passes through on the way, as one croqui
+   *  bend: the point farthest off the straight line says which side, and how far.
+   *  An elbowed arrow comes out as a curve round the same corner. */
+  function bendOf(elm, span) {
+    var pts = Array.isArray(elm.points) ? elm.points : [];
+    var len = Math.hypot(span.w, span.h);
+    if (pts.length < 3 || len < 1) return 0;
+    var far = 0;
+    for (var i = 1; i < pts.length - 1; i++) {
+      var px = finiteNum(elm.x) + finiteNum(pts[i][0]) - span.x;
+      var py = finiteNum(elm.y) + finiteNum(pts[i][1]) - span.y;
+      // Signed distance off the line, on the same side `sketchArrow` bows to.
+      var off = (py * span.w - px * span.h) / len;
+      if (Math.abs(off) > Math.abs(far)) far = off;
+    }
+    // The middle of the drawn curve sits half way to its control point.
+    var bend = far * 2 / len;
+    return Math.abs(bend) < 0.04 ? 0 : Math.max(-0.6, Math.min(0.6, Math.round(bend * 100) / 100));
+  }
+
   /** Which ends carry a head. An arrow drawn without touching the arrowhead picker
    *  has no `endArrowhead` at all, and it does have a head. */
   function headsFor(elm) {
@@ -3842,9 +4082,30 @@
     try { doc = JSON.parse(text); } catch (err) { return null; }
     if (!doc || !EXCALIDRAW_KINDS[doc.type] || !Array.isArray(doc.elements)) return null;
 
-    var live = doc.elements.filter(function (elm) {
-      return elm && typeof elm === "object" && !elm.isDeleted && typeof elm.type === "string";
+    /* One element per id. A copy can carry the same element twice — a frame's
+     * children listed with the frame and again on their own, a library item
+     * dropped over its own original — and drawing every entry stacks two of each
+     * label on top of one another. The newest version wins, like Excalidraw's own
+     * restore; its place in the stacking order is that of the last entry. */
+    var all = doc.elements.filter(function (elm) {
+      return elm && typeof elm === "object" && typeof elm.type === "string";
     });
+    var newest = {};
+    all.forEach(function (elm) {
+      if (!elm.id) return;
+      var seen = newest[elm.id];
+      if (!seen || finiteNum(elm.version) >= finiteNum(seen.version)) newest[elm.id] = elm;
+    });
+    var live = [], placed = {};
+    for (var at = all.length - 1; at >= 0; at--) {
+      var one = all[at];
+      if (one.id) {
+        if (placed[one.id]) continue;
+        placed[one.id] = true;
+        one = newest[one.id];
+      }
+      if (!one.isDeleted) live.unshift(one);
+    }
     var index = {};
     live.forEach(function (elm) { if (elm.id) index[elm.id] = elm; });
 
@@ -3961,6 +4222,7 @@
         stroke: excalidrawStroke(elm.strokeWidth),
         rough: elm.roughness === 0 || elm.roughness === 2 ? elm.roughness : 1,
         heads: LINEAR[type] ? headsFor(elm) : null,
+        bend: LINEAR[type] ? bendOf(elm, span) : 0,
       });
     });
     return found;
@@ -4066,42 +4328,57 @@
    * brings its own size. Anything that lands on a node anchors to it, like any
    * other drawing.
    */
-  function pasteDrawing(items, at) {
+  /** An item of a copy, sized for croqui: writing from outside carries no croqui
+   *  box, so a text is measured here in the map's own font. */
+  function placedItem(it) {
+    var out = {
+      type: it.type, text: it.text || "", x: it.x, y: it.y, w: it.w, h: it.h,
+      color: it.color, fill: it.fill, dash: it.dash, heads: it.heads,
+      font: it.font, align: it.align, stroke: it.stroke, rough: it.rough, keep: it.keep,
+      size: pastedTextSize(it.size), src: it.src, tie: it.tie, bend: it.bend,
+      data: it.data, mime: it.mime,
+    };
+    // `fitted` is writing that was measured where it was made, to sit centred on
+    // a point; measuring it again at another wrap would move it off that point.
+    if (it.type === "text" && !it.keep && !it.fitted) {
+      // Writing that came with a width keeps its lines: that width is where the
+      // drawing wrapped it, plus slack for croqui's letters being a little wider.
+      // Only bare text, with no width of its own, is wrapped to a column.
+      var own = it.w ? it.w * 1.15 + 18 : 0;
+      var wrap = Math.max(Math.min(PASTE_TEXT_MAX_W, Math.max(PASTE_TEXT_W, it.w || 0)), own);
+      var fit = textBox(it.text, out.size, wrap, out.font);
+      out.w = fit.w;
+      out.h = fit.h;
+    }
+    return out;
+  }
+
+  /** The options `addShape` / `makeShape` take for a placed item. */
+  function itemOptions(p) {
+    return {
+      text: p.text, size: p.size, bend: p.bend,
+      color: p.color, fill: p.fill, dash: p.dash, heads: p.heads,
+      font: p.font, align: p.align, stroke: p.stroke, rough: p.rough, keep: p.keep, pts: p.keep && p.keep.pts,
+    };
+  }
+
+  function pasteDrawing(items, at, opts) {
+    opts = opts || {};
     if (!items.length) return 0;
-    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    var placed = items.map(function (it) {
-      var out = {
-        type: it.type, text: it.text || "", x: it.x, y: it.y, w: it.w, h: it.h,
-        color: it.color, fill: it.fill, dash: it.dash, heads: it.heads,
-        font: it.font, align: it.align, stroke: it.stroke, rough: it.rough, keep: it.keep,
-        size: pastedTextSize(it.size), src: it.src, tie: it.tie,
-        data: it.data, mime: it.mime,
-      };
-      if (it.type === "text" && !it.keep) {
-        var wrap = Math.min(PASTE_TEXT_MAX_W, Math.max(PASTE_TEXT_W, it.w || 0));
-        var fit = textBox(it.text, out.size, wrap, out.font);
-        out.w = fit.w;
-        out.h = fit.h;
-      }
-      // Linear shapes keep their direction in the sign of w/h, so the corners of
-      // the run are not simply x,y and x+w,y+h.
-      minX = Math.min(minX, out.x, out.x + out.w);
-      minY = Math.min(minY, out.y, out.y + out.h);
-      maxX = Math.max(maxX, out.x, out.x + out.w);
-      maxY = Math.max(maxY, out.y, out.y + out.h);
-      return out;
-    });
-    var dx = at.x - (minX + maxX) / 2;
-    var dy = at.y - (minY + maxY) / 2;
+    var placed = items.map(placedItem);
+    // Linear shapes keep their direction in the sign of w/h, so the corners of
+    // the run are not simply x,y and x+w,y+h — itemBox folds that away.
+    var b = boundsOf(placed.map(itemBox));
+    var dx = at.x - (b.minX + b.maxX) / 2;
+    var dy = at.y - (b.minY + b.maxY) / 2;
     pushHistory();
     // Pictures need a round trip to the server first; everything else goes down now.
     var made = placed.map(function (p) {
       if (p.type === "image") return null;
-      return addShape(p.type, p.x + dx, p.y + dy, p.w, p.h, {
-        batch: true, text: p.text, size: p.size,
-        color: p.color, fill: p.fill, dash: p.dash, heads: p.heads,
-        font: p.font, align: p.align, stroke: p.stroke, rough: p.rough, keep: p.keep, pts: p.keep && p.keep.pts,
-      });
+      var o = itemOptions(p);
+      o.batch = true;
+      o.free = opts.free;
+      return addShape(p.type, p.x + dx, p.y + dy, p.w, p.h, o);
     });
     // Excalidraw arrows that held on to a box hold on to the copy of that box —
     // only a box that came along in the same copy, and never another arrow. Run
@@ -4121,17 +4398,22 @@
     tieArrows();
     var drawn = made.filter(Boolean);
     // A single drawing comes selected, so it can be moved or typed into straight
-    // away. A batch does not: the selection holds one thing, and picking the last of
-    // them would be arbitrary.
-    state.sel = drawn.length === 1 && drawn.length === placed.length ? { kind: "shape", id: drawn[0].id } : null;
+    // away. A batch comes swept up instead, outlined like any sweep: you see at
+    // once everything that arrived — a second paste on top of the first is no
+    // longer invisible — and one drag moves it, one Del takes it back out.
+    var single = drawn.length === 1 && drawn.length === placed.length;
+    state.sel = single ? { kind: "shape", id: drawn[0].id } : null;
     state.editing = null;
+    state.marked = {};
+    state.markedShapes = {};
+    if (!single) drawn.forEach(function (s) { state.markedShapes[s.id] = true; });
     markDirty();
     render();
     refreshInspector();
 
     var pictures = placed.map(function (p, i) { return p.type === "image" ? i : -1; })
       .filter(function (i) { return i >= 0; });
-    if (pictures.length) placeCopiedImages(pictures, placed, made, dx, dy, tieArrows);
+    if (pictures.length) placeCopiedImages(pictures, placed, made, dx, dy, tieArrows, placed.length > 1);
     return drawn.length + pictures.length;
   }
 
@@ -4157,7 +4439,7 @@
    * in the slot the copy gave them, at the size they had there, and join the
    * history entry the rest of the paste opened — one Ctrl+Z takes the lot.
    */
-  function placeCopiedImages(indexes, placed, made, dx, dy, tieArrows) {
+  function placeCopiedImages(indexes, placed, made, dx, dy, tieArrows, sweep) {
     if (!state.canSave) {
       toast("as imagens do Excalidraw ficaram de fora — este croqui.html é só de leitura; use croqui serve");
       return;
@@ -4178,6 +4460,7 @@
           made[i] = addShape("image", p.x + dx, p.y + dy, p.w, p.h, {
             batch: true, src: body.name, alt: "imagem do Excalidraw", front: true,
           });
+          if (sweep) state.markedShapes[made[i].id] = true;
         });
       }).catch(function () { failed++; });
     })).then(function () {
@@ -4207,6 +4490,296 @@
     field.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
+  /* --------------------------------------------------- a diagram, imported */
+
+  /* A UML diagram onto the map's own palette. Its tones are the map's colours under
+   * other names; what has no colour of its own here goes in ink, as on the tab. */
+  var TONE_COLOR = {
+    route: "ink", service: "purple", repo: "teal", table: "amber", external: "ink",
+    get: "green", post: "blue", put: "orange", patch: "orange", "delete": "red",
+    ok: "green", warn: "orange", danger: "red", muted: "ink", accent: "purple",
+  };
+  var DIAGRAM_TEXT = 13;
+  var DIAGRAM_TITLE = 22;
+
+  /** A label of a diagram, measured and centred on a point, as a text drawing. */
+  function centredText(text, cx, cy, size, color) {
+    var fit = textBox(text, size, 260, "normal");
+    return {
+      type: "text", text: text, x: cx - fit.w / 2, y: cy - fit.h / 2, w: fit.w, h: fit.h,
+      size: size, font: "normal", align: "center", color: color || "ink", fitted: true,
+    };
+  }
+
+  /**
+   * An edge's label, beside its arrow rather than on it: there is no plate under
+   * a text drawing to hide the stroke, so writing laid over the line is crossed
+   * out by it. It goes to the outside of a bend, and above a straight run — or to
+   * the right of an upright one.
+   */
+  function edgeLabel(text, p, q, bend) {
+    var size = 11.5;
+    var fit = textBox(text, size, 260, "normal");
+    var mid = curveMiddle(p, q, bend);
+    var len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+    var nx = -(q.y - p.y) / len, ny = (q.x - p.x) / len;
+    var side = bend ? (bend > 0 ? 1 : -1) : Math.abs(ny) > 0.3 ? (ny > 0 ? -1 : 1) : (nx > 0 ? 1 : -1);
+    // How far the middle of the writing sits off the line: half of its own extent
+    // across the line (the box minus its inset), and a little air.
+    var off = Math.abs(nx) * (fit.w - 18) / 2 + Math.abs(ny) * (fit.h - 18) / 2 + 5;
+    var cx = mid.x + nx * side * off, cy = mid.y + ny * side * off;
+    return {
+      type: "text", text: text, x: cx - fit.w / 2, y: cy - fit.h / 2, w: fit.w, h: fit.h,
+      size: size, font: "normal", align: "center", color: "ink", fitted: true,
+    };
+  }
+
+  /**
+   * A drawn mermaid diagram — the model the UML tab draws — as map drawings.
+   *
+   * The layout comes along exactly as the tab placed it, so the picture you were
+   * reading is the picture that lands; from then on it is ordinary drawings you
+   * can move, restyle and write in. Arrows hold on to the boxes they join, so
+   * dragging a box drags its arrows. croqui's arrows carry no writing, so an edge
+   * label becomes a text at the arrow's middle.
+   */
+  function mermaidDrawing(model, title) {
+    var found = { items: [], skipped: {} };
+    function skip(kind) { found.skipped[kind] = (found.skipped[kind] || 0) + 1; }
+    function push(item) { found.items.push(item); }
+
+    if (title) {
+      var head = textBox(title, DIAGRAM_TITLE, 900, "normal");
+      push({
+        type: "text", text: title, x: 0, y: -head.h - 24, w: head.w, h: head.h,
+        size: DIAGRAM_TITLE, font: "normal", color: "ink", fitted: true,
+      });
+    }
+
+    if (model.kind === "sequence") {
+      var actor = {};
+      model.actors.forEach(function (a) {
+        actor[a.id] = a;
+        push({
+          type: "line", x: a.cx, y: model.lifelineTop, w: 0, h: model.lifelineBottom - model.lifelineTop,
+          color: "ink", dash: true, stroke: 1, heads: "none",
+        });
+        push({
+          type: "rect", x: a.x, y: a.y, w: a.w, h: a.h, text: a.lines.join("\n"),
+          size: DIAGRAM_TEXT, font: "normal", color: "ink", fill: false,
+        });
+      });
+      model.notes.forEach(function (n) {
+        if (n.x == null) return;
+        push({
+          type: "rect", x: n.x, y: n.y, w: n.w, h: n.h, text: n.lines.join("\n"),
+          size: 12, font: "normal", color: "amber", fill: true,
+        });
+      });
+      model.messages.forEach(function (m) {
+        var a = actor[m.from], b = actor[m.to];
+        if (!a || !b) return;
+        if (a === b) {
+          // A message to itself is a loop croqui has no stroke for: its words stay,
+          // beside the lifeline, marked as a return.
+          if (m.label) push(centredText("↩ " + m.label, a.cx + 70, m.y + 10, 11.5));
+          return;
+        }
+        push({
+          type: m.lost ? "line" : "arrow", x: a.cx, y: m.y, w: b.cx - a.cx, h: 0,
+          color: "ink", dash: !!m.dashed, heads: m.lost ? "none" : "end",
+        });
+        if (m.label) push(centredText(m.label, (a.cx + b.cx) / 2, m.y - 14, 11.5));
+      });
+      return found;
+    }
+
+    // Frames first, so they sit behind what they hold.
+    (model.frames || []).forEach(function (f) {
+      push({
+        type: "frame", x: f.x, y: f.y, w: f.w, h: f.h, src: "frame:" + f.id,
+        text: f.label || f.id, size: 12, font: "normal", color: "ink",
+      });
+    });
+    var byId = {};
+    model.nodes.forEach(function (n) { byId[n.id] = n; });
+    var shaped = function (n) { return { x: n.x, y: n.y, w: n.w, h: n.h, type: n.shape }; };
+    var pairs = {};
+    model.edges.forEach(function (e) { if (!e.invisible) pairs[e.from + ">" + e.to] = true; });
+    var labels = [];
+    model.edges.forEach(function (e) {
+      var a = byId[e.from], b = byId[e.to];
+      if (e.invisible || !a || !b) return;
+      if (a === b) { skip("loop"); return; }
+      // The same ends the arrow will hold on to once it is tied, so the curve and
+      // its label are worked out on the line that is actually drawn.
+      var A = shaped(a), B = shaped(b);
+      var p = boundaryPoint(A, b.x + b.w / 2, b.y + b.h / 2);
+      var q = boundaryPoint(B, a.x + a.w / 2, a.y + a.h / 2);
+      var others = model.nodes.filter(function (n) { return n !== a && n !== b; }).map(shaped);
+      var bend = clearBend(p, q, others);
+      // A way back over the same two boxes would lie exactly on the way there.
+      if (!bend && e.from > e.to && pairs[e.to + ">" + e.from]) bend = 0.22;
+      push({
+        type: e.heads === "none" ? "line" : "arrow", x: p.x, y: p.y, w: q.x - p.x, h: q.y - p.y,
+        color: "ink", dash: !!e.dashed, stroke: e.thick ? 3 : 2, heads: e.heads || "end", bend: bend,
+        tie: { from: "node:" + a.id, to: "node:" + b.id },
+      });
+      if (e.label) labels.push(edgeLabel(e.label, p, q, bend));
+    });
+    model.nodes.forEach(function (n) {
+      var paint = n.paint || {};
+      var color = (n.tone && TONE_COLOR[n.tone]) || nearestColor(paint.stroke || paint.fill) || "ink";
+      push({
+        type: n.shape || "rect", x: n.x, y: n.y, w: n.w, h: n.h, src: "node:" + n.id,
+        text: n.lines.join("\n"), size: DIAGRAM_TEXT, font: "normal", color: color,
+        fill: !!(n.tone || paint.fill),
+      });
+    });
+    // Over the arrows they name, where they can be read.
+    labels.forEach(push);
+    return found;
+  }
+
+  /** A point on an arrow's curve, t from 0 (tail) to 1 (tip) — the quadratic
+   *  `sketchArrow` draws for that bend. */
+  function curvePoint(p, q, bend, t) {
+    var dx = q.x - p.x, dy = q.y - p.y;
+    var len = Math.hypot(dx, dy) || 1;
+    var bow = (bend || 0) * len;
+    var cx = (p.x + q.x) / 2 - dy / len * bow, cy = (p.y + q.y) / 2 + dx / len * bow;
+    var u = 1 - t;
+    return { x: u * u * p.x + 2 * u * t * cx + t * t * q.x, y: u * u * p.y + 2 * u * t * cy + t * t * q.y };
+  }
+
+  function curveMiddle(p, q, bend) {
+    return curvePoint(p, q, bend, 0.5);
+  }
+
+  /**
+   * How far to arc an arrow so it goes round the boxes between its ends: 0 when
+   * the straight line is already clear, otherwise the gentlest bend, on either
+   * side, that misses them. A diagram laid out in ranks has edges that skip a
+   * rank, and straight they run right through the box in the middle.
+   */
+  function clearBend(p, q, boxes) {
+    function blocked(bend) {
+      for (var i = 1; i < 24; i++) {
+        var at = curvePoint(p, q, bend, i / 24);
+        for (var j = 0; j < boxes.length; j++) {
+          var b = boxes[j];
+          if (at.x > b.x - 6 && at.x < b.x + b.w + 6 && at.y > b.y - 6 && at.y < b.y + b.h + 6) return true;
+        }
+      }
+      return false;
+    }
+    if (!blocked(0)) return 0;
+    var tries = [0.2, -0.2, 0.35, -0.35, 0.5, -0.5, 0.7, -0.7];
+    for (var k = 0; k < tries.length; k++) if (!blocked(tries[k])) return tries[k];
+    return 0.35;
+  }
+
+  /** The `title:` of a mermaid file's front matter, if it has one. */
+  function frontTitle(source) {
+    var front = /^\s*---\n([\s\S]*?)\n---/.exec(source || "");
+    var title = front && /^title:\s*(.+)$/m.exec(front[1]);
+    return title ? title[1].trim().replace(/^(["'])(.*)\1$/, "$2") : null;
+  }
+
+  /** The text of a diagram file, as drawings — or `{error}` saying why not. */
+  function diagramFromText(text, name) {
+    text = String(text || "").replace(/^﻿/, "");
+    var copy = excalidrawDrawing(text.trim());
+    if (copy) return copy;
+    var source = text;
+    // A Markdown document: the first mermaid block in it is the diagram.
+    if (/\.(md|markdown)$/i.test(name || "")) {
+      var fence = /```mermaid[^\n]*\n([\s\S]*?)```/.exec(text);
+      if (!fence) return { error: "nenhum bloco ```mermaid em " + name };
+      source = fence[1];
+    }
+    if (!window.croquiMermaid) return { error: "diagram.js não carregou" };
+    var model;
+    try {
+      model = window.croquiMermaid.parse(source);
+    } catch (err) {
+      return { error: "não consegui ler o diagrama — " + (err && err.message || err) };
+    }
+    if (model.kind === "flowchart" || model.kind === "sequence") return mermaidDrawing(model, frontTitle(source));
+    if (model.kind === "empty") return { error: "diagrama vazio" + (name ? " em " + name : "") };
+    if (model.kind === "broken") return { error: "não consegui ler o diagrama — " + model.message };
+    return { error: "croqui ainda não desenha " + (model.diagram || "este tipo de diagrama") +
+      " — use .excalidraw, flowchart ou sequenceDiagram" };
+  }
+
+  /** The box an imported item covers, with a line's direction folded away. */
+  function itemBox(it) {
+    return {
+      x: Math.min(it.x, it.x + (it.w || 0)), y: Math.min(it.y, it.y + (it.h || 0)),
+      w: Math.abs(it.w || 0), h: Math.abs(it.h || 0),
+    };
+  }
+
+  /**
+   * Bring a whole diagram onto the map.
+   *
+   * It lands in the middle of what you are looking at when there is room there,
+   * and otherwise on clear paper under the map — never on top of the boxes, where
+   * half of it would hide behind them. It stays on the paper rather than anchoring
+   * to the nodes it passes over, comes swept up so one drag places it, and the
+   * camera follows it there.
+   */
+  function importDrawing(copy, what) {
+    if (!copy || copy.error) { toast(copy && copy.error ? copy.error : "nada para importar"); return; }
+    var left = skippedSummary(copy.skipped || {});
+    if (!copy.items.length) {
+      toast(left ? "no diagrama só tem " + left + " — o croqui não desenha isso" : "nada para importar");
+      return;
+    }
+    if (state.tab !== "map") setTab("map");
+    var b = boundsOf(copy.items.map(itemBox));
+    var w = b.maxX - b.minX, h = b.maxY - b.minY;
+    var rect = el.canvas.getBoundingClientRect();
+    var at = screenToScene(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    var taken = contentBoxes();
+    var spot = { x: at.x - w / 2, y: at.y - h / 2, w: w, h: h };
+    if (taken.some(function (t) { return overlaps(spot, t); })) {
+      var all = boundsOf(taken);
+      at = { x: all.minX + w / 2, y: all.maxY + 140 + h / 2 };
+    }
+    var n = pasteDrawing(copy.items, at, { free: true });
+    glideTo(framing({ minX: at.x - w / 2, minY: at.y - h / 2, maxX: at.x + w / 2, maxY: at.y + h / 2 }));
+    toast((what ? what + " → " : "") + n + (n > 1 ? " desenhos no mapa" : " desenho no mapa") +
+      (left ? " — fora: " + left : "") + " · arraste para posicionar" + savedHint());
+  }
+
+  /** A file picked or dropped: a picture is pasted, a diagram imported. */
+  function importFile(file) {
+    if (!file) return;
+    if (file.type && file.type.indexOf("image/") === 0) { pasteImage(file, pastePoint()); return; }
+    if (file.size > MAX_IMPORT_MB * 1024 * 1024) {
+      toast("arquivo acima de " + MAX_IMPORT_MB + " MB — grande demais para um diagrama");
+      return;
+    }
+    var read = file.text ? file.text() : new Promise(function (resolve, reject) {
+      var r = new FileReader();
+      r.onload = function () { resolve(String(r.result || "")); };
+      r.onerror = function () { reject(r.error); };
+      r.readAsText(file);
+    });
+    read.then(function (text) {
+      importDrawing(diagramFromText(text, file.name), file.name);
+    }).catch(function (err) {
+      toast("não consegui ler " + (file.name || "o arquivo") + ": " + (err && err.message || err));
+    });
+  }
+
+  function pickDiagram() {
+    if (!el.importInput) return;
+    el.importInput.value = "";
+    el.importInput.click();
+  }
+
   /* ----------------------------------------------------------- drawing tools */
 
   function draftBox(d) {
@@ -4233,6 +4806,7 @@
 
   function commitMarquee(d) {
     state.draft = null;
+    state.preview = null;
     renderOverlay();
     // A click on bare paper, without a sweep, is how you start over.
     if (!d.moved) {
@@ -4266,6 +4840,8 @@
       var refs = state.shapeEls[id];
       if (refs && refs.g) refs.g.classList.toggle("marked", !!drawn[id]);
     });
+    state.preview = { nodes: nodes, drawn: drawn };
+    renderOverlay();
   }
 
   /** Every drawing whose box meets the swept rectangle. */
@@ -4342,7 +4918,17 @@
    * real rubber, while a filled one, a picture or writing is touched anywhere.
    */
   function touches(s, x, y, tol) {
-    if (isLinear(s)) return distToSegment(x, y, s.x, s.y, s.x + s.w, s.y + s.h) <= tol + 2;
+    if (isLinear(s) && !s.bend) return distToSegment(x, y, s.x, s.y, s.x + s.w, s.y + s.h) <= tol + 2;
+    if (isLinear(s)) {
+      // A bent one is followed along its curve, a few straight steps at a time.
+      var tail = { x: s.x, y: s.y }, tip = { x: s.x + s.w, y: s.y + s.h }, prev = tail;
+      for (var k = 1; k <= 16; k++) {
+        var at = curvePoint(tail, tip, s.bend, k / 16);
+        if (distToSegment(x, y, prev.x, prev.y, at.x, at.y) <= tol + 2) return true;
+        prev = at;
+      }
+      return false;
+    }
     if (isPencil(s)) {
       var pts = (s.pts || []).map(function (p) { return [s.x + p[0] * s.w, s.y + p[1] * s.h]; });
       for (var i = 0; i < pts.length; i++) {
@@ -4495,6 +5081,21 @@
         var ratio = Math.sqrt((s.w / st.w) * (s.h / st.h));
         s.size = Math.max(TEXT_RANGE[0], Math.min(TEXT_RANGE[1], Math.round(st.size * ratio)));
         if (el.insSizeVal) el.insSizeVal.textContent = s.size + "px";
+      }
+      // The box follows its writing. A text box hugs its lines — narrower from the
+      // side means more lines and a taller box, wider means fewer and a shorter
+      // one — and any other shape stops shrinking where its writing would be cut.
+      // Only the top and bottom handles of a text box may leave room below.
+      if (!noText(s) && s.type !== "frame" && s.text) {
+        applyShapeGeometry(s);   // re-wrap at the new width before measuring
+        var need = writingHeight(s);
+        var hug = s.type === "text" && d.handle !== "n" && d.handle !== "s";
+        var fit = hug ? need : Math.max(s.h, need);
+        if (need && fit !== s.h) {
+          // A north handle holds the bottom edge still; every other one the top.
+          if (d.handle.indexOf("n") >= 0) s.y = Math.round(bottom - fit);
+          s.h = fit;
+        }
       }
     }
     // A north or west handle moves the origin, so the offset has to follow.
@@ -4879,6 +5480,29 @@
     });
     on(el.docBack, "click", openGallery);
 
+    on(document.getElementById("import-open"), "click", pickDiagram);
+    on(el.importInput, "change", function () {
+      importFile(el.importInput.files && el.importInput.files[0]);
+    });
+    /* A file dropped on the map is a file pasted: a picture lands under the
+     * pointer, a .excalidraw or .mmd is imported whole. Only files — a drag of
+     * text or a link from another page is the browser's business. */
+    function carriesFiles(ev) {
+      var types = ev.dataTransfer && ev.dataTransfer.types;
+      return !!types && Array.prototype.indexOf.call(types, "Files") >= 0;
+    }
+    on(el.canvas, "dragover", function (ev) {
+      if (!carriesFiles(ev)) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = "copy";
+    });
+    on(el.canvas, "drop", function (ev) {
+      if (!carriesFiles(ev)) return;
+      ev.preventDefault();
+      state.point = { x: ev.clientX, y: ev.clientY };
+      Array.prototype.forEach.call(ev.dataTransfer.files || [], importFile);
+    });
+
     on(el.fit, "click", fitToView);
     on(el.reset, "click", function () {
       if (!confirm("Descartar posições, ocultos, desenhos e relações? (Ctrl+Z desfaz)")) return;
@@ -4895,6 +5519,8 @@
       refreshInspector();
       fitToView();
     });
+    on(el.lost, "click", backToContent);
+    window.addEventListener("resize", syncLost);
     on(el.undo, "click", undo);
     on(el.redo, "click", redo);
     on(el.clearFocus, "click", function () { setFocus(null); });
@@ -4911,9 +5537,20 @@
      * document rather than the canvas because the canvas is not focusable, so a
      * paste never reaches it. An Excalidraw copy arrives as JSON; what goes onto
      * the map is the writing in it, not the JSON. */
+    /* Linux pastes its PRIMARY selection on a middle click, and the middle button
+     * is how the map pans: every pan dropped one more copy of whatever was last
+     * copied or selected on top of the first. A paste that arrives right on the
+     * heels of the middle button is that, not a Ctrl+V — Excalidraw guards against
+     * the same thing. Inside a text field it is still the paste Linux users expect. */
+    function middleButton(ev) { if (ev.button === 1) state.middleAt = Date.now(); }
+    document.addEventListener("pointerdown", middleButton, true);
+    document.addEventListener("pointerup", middleButton, true);
+    document.addEventListener("auxclick", middleButton, true);
+
     document.addEventListener("paste", function (ev) {
       var data = ev.clipboardData;
       var typing = !!ev.target && (ev.target.tagName === "INPUT" || ev.target.tagName === "TEXTAREA");
+      if (!typing && Date.now() - (state.middleAt || 0) < 700) { ev.preventDefault(); return; }
 
       if (!typing) {
         var blob = clipboardImage(data);
@@ -5041,6 +5678,7 @@
       }
       if (ev.key === "Delete" || ev.key === "Backspace") {
         if (state.sel) { ev.preventDefault(); deleteSelection(); }
+        else if (state.tab === "map" && markedShapeIds().length) { ev.preventDefault(); deleteMarked(); }
         return;
       }
       if (mod || ev.altKey) return;
@@ -5198,6 +5836,12 @@
       if (isLinear(s)) {
         el0.x = s.x; el0.y = s.y;
         el0.points = [[0, 0], [s.w, s.h]];
+        // A bent arrow goes through the middle of its curve, drawn round there.
+        if (s.bend) {
+          var mid = curveMiddle({ x: 0, y: 0 }, { x: s.w, y: s.h }, s.bend);
+          el0.points = [[0, 0], [Math.round(mid.x), Math.round(mid.y)], [s.w, s.h]];
+          el0.roundness = { type: 2 };
+        }
         var heads = s.type === "arrow" ? (s.heads || "end") : "none";
         el0.startArrowhead = heads === "both" ? "arrow" : null;
         el0.endArrowhead = heads === "end" || heads === "both" ? "arrow" : null;
@@ -5422,6 +6066,7 @@
     } else {
       refreshInspector();
     }
+    syncLost();
   }
 
   function setTab(tab) {
@@ -5553,18 +6198,98 @@
     if (section === "uml") {
       // The whole panel, with its own viewport: this tab has one job, and a
       // diagram you cannot zoom into is a diagram whose relations you cannot read.
-      var card = diagramCard(doc.text, doc.name, true);
+      var card = doc.format === "excalidraw" ? drawingCard(doc) : diagramCard(doc.text, doc.name, true);
       el.docBody.appendChild(card);
       state.stage = card.querySelector(".dg-stage");
       // A diagram croqui cannot draw comes back as a source listing, which wants
       // the padding and the scrollbar the stage gives up.
-      if (state.stage) el.docBody.classList.add("staged");
+      if (state.stage) {
+        el.docBody.classList.add("staged");
+        state.stage.appendChild(toMapButton(state.stage, doc));
+      }
+      // The writing in a drawing is measured where it lands, so it goes last.
+      if (card.__ready) card.__ready();
       return;
     }
     // Markdown is escaped inside mdToHtml before any transform runs; drawFences
     // then reads each mermaid block back out of the DOM as text.
     el.docBody.innerHTML = mdToHtml(doc.text);
     drawFences(el.docBody);
+  }
+
+  /**
+   * "levar ao mapa": the diagram on the stage becomes drawings on the map.
+   *
+   * It takes the stage's own model rather than parsing the file again, so boxes
+   * you dragged around to read the diagram land where you left them. The file is
+   * not touched — what goes to the map is a copy you are free to redraw.
+   */
+  function toMapButton(stage, doc) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "dg-to-map";
+    b.textContent = "levar ao mapa";
+    b.title = "copiar este diagrama para o mapa como desenhos editáveis — o arquivo não muda";
+    b.addEventListener("click", function () {
+      if (doc.format === "excalidraw") {
+        importDrawing(excalidrawDrawing(String(doc.text || "").trim()), doc.name);
+        return;
+      }
+      var model = stage.__model;
+      if (!model) return;
+      importDrawing(mermaidDrawing(model, frontTitle(model.source) || doc.title), doc.name);
+    });
+    return b;
+  }
+
+  /**
+   * An .excalidraw file on the UML tab, drawn by the map's own pencil.
+   *
+   * It goes through the importer a paste goes through and is drawn by the same
+   * `renderShape` as the map, so what the tab shows is exactly what "levar ao
+   * mapa" puts there — nothing on this tab is a second rendering of the file.
+   * The shapes are built aside and never enter the layout.
+   */
+  function drawingCard(doc) {
+    var wrap = document.createElement("figure");
+    wrap.className = "diagram";
+    var copy = excalidrawDrawing(String(doc.text || "").trim());
+    if (!copy) {
+      wrap.appendChild(note("não consegui ler " + doc.name + " como um desenho do Excalidraw"));
+      wrap.appendChild(sourceBlock(doc.text));
+      return wrap;
+    }
+    var placed = copy.items.map(placedItem);
+    if (!placed.length) {
+      wrap.appendChild(note("nada que o croqui saiba desenhar em " + doc.name));
+      return wrap;
+    }
+    var b = boundsOf(placed.map(itemBox));
+    var list = placed.map(function (p, i) {
+      var o = itemOptions(p);
+      o.id = "dg-" + i;
+      if (p.type === "image") { o.src = p.data; o.alt = "imagem do desenho"; }
+      return makeShape(p.type, p.x - b.minX, p.y - b.minY, p.w, p.h, o);
+    });
+    var model = { width: Math.max(1, b.maxX - b.minX), height: Math.max(1, b.maxY - b.minY), source: doc.text };
+    var svg = diagramSvg(model, true);
+    var layer = svgEl("g", { class: "dg-drawing" });
+    svg.appendChild(layer);
+    // renderShape files what it draws under the map's own registers; those are
+    // put back untouched, so the map never sees these shapes.
+    var keep = { els: state.shapeEls, after: state.after };
+    state.shapeEls = {};
+    state.after = [];
+    list.forEach(function (s) { renderShape(s, layer); });
+    var after = state.after;
+    state.shapeEls = keep.els;
+    state.after = keep.after;
+    wrap.classList.add("full");
+    wrap.appendChild(diagramStage(svg, model));
+    var left = skippedSummary(copy.skipped);
+    if (left) wrap.appendChild(note("fora do desenho: " + left));
+    wrap.__ready = function () { after.forEach(function (fn) { fn(); }); };
+    return wrap;
   }
 
   /** Swap every ```mermaid block in a rendered PRD for a drawn diagram. */
@@ -5913,6 +6638,7 @@
     stage.__fit = fit;
     stage.__zoom = zoomAt;
     stage.__view = view;
+    stage.__model = model;
     fit();
     return stage;
   }
@@ -6203,7 +6929,9 @@
     el.docFile = document.getElementById("doc-file");
     el.docBody = document.getElementById("doc-body");
     el.zoom = document.getElementById("zoom");
+    el.lost = document.getElementById("lost");
     el.imageInput = document.getElementById("image-input");
+    el.importInput = document.getElementById("import-input");
     el.zoomVal = document.getElementById("zoom-val");
     el.insColors = document.getElementById("ins-colors");
     el.insColorsSec = document.getElementById("ins-colors-sec");
