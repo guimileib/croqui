@@ -28,42 +28,45 @@ Request: {request}
 
 If the request is empty, ask in one line what to draw and stop. Answer in the user's language.
 
+A diagram argues, it does not list: real names, real evidence, a structure that
+makes the point. Mermaid `.mmd` for a quick view; Excalidraw `.excalidraw` to explain
+or present.
+
 ## 1. Draw from the map (free: no model tokens)
 
 About this codebase:
 
 1. No `.croqui/graph.json`, or the code changed since: `croqui scan .` (seconds, no LLM).
-2. `croqui draw "<endpoint path, table or service>"` writes a finished, styled diagram
-   to the UML folder: layers, shapes, colours, labelled edges, the chain down to the
-   tables. Several targets are fine; none draws an overview. Options: `--name`,
-   `--direction TB`, `--depth N`, `--max-nodes N`, `--stdout`.
-3. Edit that file only for what the map cannot know (business conditions, decisions,
-   better names). Delete its `%% croqui:draw` line once you do, or the next draw
-   replaces it. `croqui context --node "<name>"` has the facts; open at most 3
-   source files, only the relevant function.
+2. `croqui draw "<endpoint path, table or service>"` writes a finished diagram to the
+   UML folder: layers, colours, labelled edges, the chain down to the tables.
+   `--format excalidraw` adds a summary line, sections and evidence (columns,
+   methods, handlers). Several targets are fine; none draws an overview. Also
+   `--name`, `--direction TB`, `--depth N`, `--max-nodes N`, `--stdout`.
+3. Edit only what the map cannot know (business rules, decisions, better names), then
+   delete the `croqui:draw` marker (`%%` line, or the `"source"` text) so the next
+   draw does not replace it. `croqui context --node "<name>"` has the facts; open at
+   most 3 source files, only the relevant function.
 4. Never run `croqui enrich` or `croqui prd` (they call an LLM). Install if missing:
    `pipx install croqui`.
 
-Not about this codebase (e.g. "a login flow for a new app"): skip the above and write
-the diagram by hand, section 2.
+Not about this codebase (e.g. "a login flow for a new app"): write it by hand, section 2.
 
 ## 2. Writing one by hand
 
-File: `<uml folder>/<kebab-case-name>.mmd` (folder under "como escrever aqui" in
+Excalidraw: run `croqui design` and follow it. File: `<uml folder>/<name>.excalidraw`.
+
+Mermaid: `<uml folder>/<kebab-case-name>.mmd` (folder under "como escrever aqui" in
 `croqui context`, default `.croqui/uml/`). Never edit a file with `%% croqui:gerado`.
+croqui draws `flowchart` (`LR` pipelines, `TB` hierarchies) and `sequenceDiagram`;
+do an ER view as a flowchart of `[(table)]` nodes.
 
-croqui draws `flowchart` (`LR` pipelines, `TB` hierarchies) and `sequenceDiagram`
-(request/response timing). Other types are shown as source: do an ER view as a
-flowchart of `[(table)]` nodes.
-
-- Start with a frontmatter `title`.
+- Frontmatter `title`; one `subgraph` with a quoted title per layer or context.
 - Shapes: endpoint `([POST /leads])`, service `[LeadService]`, repository
   `[[LeadRepository]]`, table `[(tb_leads)]`, decision `{{qualified?}}`, external
   `{{{{Stripe}}}}`.
-- Colour with palette classes (theme-aware, no `classDef`): `:::get` `:::post`
-  `:::put` `:::patch` `:::delete` `:::route` `:::service` `:::repo` `:::table`
-  `:::external` `:::ok` `:::warn` `:::danger` `:::muted` `:::accent`.
-- One `subgraph` with a quoted title per layer or context.
+- Colour is meaning, by palette class (no `classDef`): `:::get` `:::post` `:::put`
+  `:::patch` `:::delete` `:::route` `:::service` `:::repo` `:::table` `:::external`
+  `:::ok` `:::warn` `:::danger` `:::muted` `:::accent`.
 - Label edges: `-->|grava: insert|`, `-.->|lê|` reads, `==>` main path.
 - At most 25 nodes and 4 words per label; split big requests into several files.
 
@@ -91,8 +94,10 @@ flowchart LR
 
 ## 3. Check and show
 
-- `croqui lint` (exit 1 = error): fix what it reports before building.
-- `croqui build .` writes `.croqui/croqui.html`; the diagram is in its **UML** tab.
+- `croqui lint` (exit 1 = error): fix everything it reports (for `.excalidraw`:
+  bindings, text that does not fit, overlaps) and re-run until clean.
+- `croqui build .` writes `.croqui/croqui.html`; the **UML** tab draws both formats,
+  and its "levar ao mapa" copies a diagram onto the map.
 - Never run `croqui serve` (it never exits). Tell the user it is the live view
   (http://127.0.0.1:7777).
 

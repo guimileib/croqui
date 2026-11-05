@@ -348,7 +348,7 @@ def cmd_context(args: argparse.Namespace) -> int:
 
 
 def cmd_draw(args: argparse.Namespace) -> int:
-    """A styled Mermaid flowchart from the map, with no model involved."""
+    """A styled diagram from the map — Mermaid or Excalidraw — with no model involved."""
     from .draw import DrawError, draw, write
 
     # `croqui draw "/v1/leads"` names no path: the first word is one only when it is a
@@ -366,7 +366,7 @@ def cmd_draw(args: argparse.Namespace) -> int:
         drawing = draw(
             load_graph(graph_path), targets,
             depth=args.depth, up=args.up, max_nodes=args.max_nodes,
-            direction=args.direction, title=args.title,
+            direction=args.direction, title=args.title, format=args.format,
         )
         if args.stdout:
             print(drawing.text, end="")
@@ -380,6 +380,14 @@ def cmd_draw(args: argparse.Namespace) -> int:
     left = f", {drawing.omitted} fora" if drawing.omitted else ""
     rel = path.relative_to(root).as_posix() if path.is_relative_to(root) else str(path)
     _say(f"{GREEN}✓{RESET} {rel} {DIM}({status}, {drawing.nodes} nós{left}){RESET}")
+    return 0
+
+
+def cmd_design(args: argparse.Namespace) -> int:
+    """How to draw a diagram that argues — read by a model before drawing by hand."""
+    from .design import guide
+
+    print(guide(), end="")
     return 0
 
 
@@ -522,12 +530,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_draw = subs.add_parser(
         "draw",
-        help="draw a styled Mermaid diagram from the map, no model needed (see also: croqui lint)",
+        help="draw a styled diagram (Mermaid or Excalidraw) from the map, no model needed "
+             "(see also: croqui lint)",
     )
     p_draw.add_argument("items", nargs="*", metavar="[path] target",
                         help="a project path (optional), then node ids, endpoint paths, tables or services; "
                              "none draws an overview")
     p_draw.add_argument("--name", help="file name in the uml folder (default: from the targets)")
+    p_draw.add_argument("--format", choices=["mermaid", "excalidraw"], default="mermaid",
+                        help="mermaid (.mmd, the cheap view) or excalidraw (.excalidraw: sections, "
+                             "evidence and colour as meaning; opens in Excalidraw and in the UML tab)")
     p_draw.add_argument("--direction", type=str.upper, choices=["LR", "TB"], default="LR")
     p_draw.add_argument("--title", help="diagram title (default: from the targets)")
     p_draw.add_argument("--depth", type=int, default=4, help="hops downstream of each target (default 4)")
@@ -538,9 +550,16 @@ def build_parser() -> argparse.ArgumentParser:
                         help="overwrite a file `croqui draw` did not write")
     p_draw.set_defaults(func=cmd_draw)
 
+    p_design = subs.add_parser(
+        "design",
+        help="print the design method for diagrams that argue (patterns, evidence, palette, checks)",
+    )
+    p_design.set_defaults(func=cmd_design)
+
     p_lint = subs.add_parser(
         "lint",
-        help="check Mermaid files against what the viewer draws (default: the whole uml folder)",
+        help="check Mermaid and Excalidraw files against what the viewer draws "
+             "(default: the whole uml folder)",
     )
     p_lint.add_argument("files", nargs="*")
     p_lint.add_argument("--path", default=".", help="the project (default: .)")

@@ -1,4 +1,4 @@
-"""``croqui draw``: a styled Mermaid flowchart straight from the map, with no model in the loop.
+"""``croqui draw``: a styled diagram straight from the map, with no model in the loop.
 
 A model that draws a diagram by hand spends tokens on the part the map already knows
 (who calls whom, which table is touched) and on styling it gets slightly different
@@ -7,6 +7,8 @@ give a byte-identical file, so it diffs well and re-running it is free. What is 
 for the model is only what the code cannot tell — a business condition, a better name.
 
 The output stays inside what ``viewer/diagram.js`` draws; ``lint.py`` holds it to that.
+``--format excalidraw`` writes the same selection as an Excalidraw file laid out to
+argue rather than list — see ``excalidraw.py``.
 """
 
 from __future__ import annotations
@@ -28,6 +30,8 @@ DEFAULT_NAME = "visao-geral"
 NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
 SUFFIXES = (".mmd", ".mermaid")
 DIRECTIONS = ("LR", "TB")
+# format -> the extensions its files may have, the first being the default.
+FORMATS = {"mermaid": SUFFIXES, "excalidraw": (".excalidraw",)}
 
 DEFAULT_DEPTH = 4
 DEFAULT_UP = 1
@@ -69,6 +73,7 @@ class Drawing:
     title: str
     name: str                       # the file name `write` picks when none is given
     missing: list[str] = field(default_factory=list)   # targets the map has no node for
+    format: str = "mermaid"
 
 
 # --------------------------------------------------------------------- selection
@@ -272,6 +277,7 @@ def draw(
     max_nodes: int = DEFAULT_MAX_NODES,
     direction: str = "LR",
     title: str | None = None,
+    format: str = "mermaid",
 ) -> Drawing:
     """The diagram for ``targets`` (or an overview of the whole map when there are none)."""
     nodes = _index(graph)
@@ -282,6 +288,8 @@ def draw(
         raise DrawError(f"--direction tem de ser {' ou '.join(DIRECTIONS)}.")
     if max_nodes < 1 or depth < 0 or up < 0:
         raise DrawError("--max-nodes tem de ser >= 1, e --depth >= 0.")
+    if format not in FORMATS:
+        raise DrawError(f"--format tem de ser {' ou '.join(FORMATS)}.")
 
     targets = [t for t in (str(t).strip() for t in targets) if t]
     out, into = _sides(graph)
@@ -308,13 +316,20 @@ def draw(
 
     omitted = max(reached - len(picked), 0)
     final_title = title or default_title
+    if format == "excalidraw":
+        from .excalidraw import compose
+
+        text = compose(graph, picked, omitted, final_title, direction)
+    else:
+        text = _compose(graph, picked, omitted, final_title, direction)
     return Drawing(
-        text=_compose(graph, picked, omitted, final_title, direction),
+        text=text,
         nodes=len(picked),
         omitted=omitted,
         title=final_title,
         name=_slug(targets),
         missing=missing,
+        format=format,
     )
 
 
@@ -330,11 +345,17 @@ def _slug(targets: list[str]) -> str:
     return slug or "diagrama"
 
 
-def file_name(name: str | None, default: str) -> str:
-    """A safe `.mmd` file name: no directories, no dotfiles, and an extension the UML tab reads."""
+def file_name(name: str | None, default: str, format: str = "mermaid") -> str:
+    """A safe file name: no directories, no dotfiles, and an extension the UML tab reads
+    for that format (`.mmd` for Mermaid, `.excalidraw` for Excalidraw)."""
     chosen = Path(name).name if name else default
-    if Path(chosen).suffix.lower() not in SUFFIXES:
-        chosen += ".mmd"
+    suffix = Path(chosen).suffix.lower()
+    wanted = FORMATS.get(format, SUFFIXES)
+    other = [f for f, s in FORMATS.items() if f != format and suffix in s]
+    if other:
+        raise DrawError(f"--name {chosen} é um arquivo {other[0]}, mas o formato pedido é {format}.")
+    if suffix not in wanted:
+        chosen += wanted[0]
     if not NAME_RE.match(chosen):
         raise DrawError("Nome inválido para --name: só letras, números, `.`, `-` e `_`.")
     return chosen
@@ -342,7 +363,7 @@ def file_name(name: str | None, default: str) -> str:
 
 def write(root: Path, drawing: Drawing, *, name: str | None = None, force: bool = False) -> tuple[Path, str]:
     """Put the diagram in the UML folder; returns (path, "criado" | "atualizado" | "igual")."""
-    target = target_dir(root, "uml") / file_name(name, drawing.name)
+    target = target_dir(root, "uml") / file_name(name, drawing.name, drawing.format)
     if target.name == RELATION_FILE:
         raise DrawError(f"`{RELATION_FILE}` é o diagrama que o croqui gera a cada scan. "
                         f"Use outro --name.")
