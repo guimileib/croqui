@@ -51,35 +51,6 @@ project-scoped one right after the first upload.
 **A version can never be re-uploaded.** A mistake costs a version number, not a fix.
 That is the whole reason for the TestPyPI step.
 
-## Publishing from GitHub instead (no token anywhere)
-
-Trusted Publishing is the better end state: PyPI trusts the repository, and no secret
-ever exists. Register the publisher once at
-https://pypi.org/manage/account/publishing/ (owner `guimileib`, repository
-`croqui`, workflow `publish.yml`, environment `pypi`), then add:
-
-```yaml
-# .github/workflows/publish.yml
-name: publish
-on:
-  push:
-    tags: ["v*"]
-jobs:
-  pypi:
-    runs-on: ubuntu-latest
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - run: pipx run build
-      - uses: pypa/gh-action-pypi-publish@release/v1
-```
-
-After that, a release is `git tag v0.2.0 && git push --tags`.
-
 ## After it is published
 
 `croqui update` starts doing the obvious thing for everyone who installed from PyPI
