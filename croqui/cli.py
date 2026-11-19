@@ -138,6 +138,22 @@ def cmd_scan(args: argparse.Namespace) -> int:
     for warning in [w for sc in scanners for w in getattr(sc, "warnings", [])][:5]:
         _say(f"  {DIM}· {warning}{RESET}")
 
+    if not getattr(args, "no_modeling", False):
+        from .modeling import build_modeling, summary
+
+        graph.modeling = build_modeling(root, registry)
+        found = summary(graph.modeling)
+        parts = [
+            f"{found[key]} {word}"
+            for key, word in (
+                ("entities", "tables in the ER model"), ("relations", "relations"),
+                ("pipelines", "pipelines"), ("agents", "agent systems"),
+            )
+            if found[key]
+        ]
+        if parts:
+            _say(f"  {GREEN}✓{RESET} modelagem: {' · '.join(parts)}")
+
     out = _out_dir(root)
     target = out / GRAPH_FILE
     previous = _baseline(out)
@@ -472,6 +488,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-docs",
         action="store_true",
         help="do not create prd/ and uml/, nor refresh the generated uml/relacoes.mmd",
+    )
+    p_scan.add_argument(
+        "--no-modeling",
+        action="store_true",
+        help="skip the modelagem tab: ER model, data pipelines (Databricks, DLT, Airflow, dbt) and agents",
     )
     p_scan.add_argument(
         "--no-migrate",

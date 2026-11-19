@@ -284,6 +284,7 @@ What it draws today:
 |---|---|
 | `graph` / `flowchart` | `TB` `TD` `BT` `LR` `RL`; node shapes `[]` `()` `([])` `[[]]` `[()]` `(())` `{}` `{{}}` `[//]`; edges `-->` `---` `-.->` `-.-` `==>` `===` `<-->`; labels as `--\>\|text\|` or `-- text -->`; chains `A --> B --> C`; fan-out `A & B --> C & D`; `subgraph … end` with a framed, labelled group; quoted labels; `<br/>`; `%%` comments |
 | `sequenceDiagram` | `participant` / `actor`, `as` aliases, `->>` `-->>` `->` `-->` `--x`, message labels, `Note over/left of/right of` |
+| `erDiagram` | entities with `type name PK,FK "comment"` columns, relations `A }o--\|\| B : label` (`--` declared, `..` dashed), drawn as table cards |
 | anything else | the diagram type is named and **your source is shown verbatim** — never a blank panel |
 
 **Colour.** The stroke stays croqui's pencil, but a node can be tinted:
@@ -304,6 +305,27 @@ each rank, subgraph members kept together. Edges that close a cycle — a retry
 pointing back at what it retries — are drawn but excluded from the ranking, because
 a cycle in a longest-path pass does not terminate, and quietly stopping it at a
 pass limit puts nodes in the wrong band instead of failing loudly.
+
+### The modelagem tab
+
+The map is deliberately abstract: an endpoint, the services it goes through, the
+tables at the end. The **modelagem** tab is the level below it, and it is not a
+folder you fill — `croqui scan` reads it out of the code, the same way it reads the
+API:
+
+| | read from | drawn as |
+|---|---|---|
+| **DER** (ER model) | the same DDL and ORM ground truth as the map's tables: columns, types, `PK`, `NOT NULL`, and foreign keys — inline `REFERENCES`, table-level `FOREIGN KEY (…) REFERENCES`, ORM `ForeignKey`. A `customer_id` with no declared key but a `customers` table beside it becomes a **dashed, "inferido"** relation | one card per table, a row per column, lines labelled with the column and the cardinality (`N:1`). Split per schema past 40 tables |
+| **pipelines** | **Databricks** asset bundles (`resources.jobs.*.tasks` with `depends_on`, `outcome`, notebook / python / SQL / pipeline / condition / for-each tasks, schedule) and Jobs API JSON; **Delta Live Tables / Lakeflow** in Python (`@dlt.table`, `@dp.materialized_view`, `dlt.read[_stream]`, `spark.read.table`, Auto Loader, `create_streaming_table` + `append_flow`, `apply_changes` / `create_auto_cdc_flow`, `@dlt.expect*`) and SQL (`CREATE OR REFRESH STREAMING TABLE … FROM STREAM(LIVE.x)`, `read_files`); **Airflow** (`>>`, `<<`, `chain`, `set_downstream`, TaskFlow `@task`, branch operators); **dbt** (`ref`, `source`, `materialized`) | the way Databricks draws them: a job as its task DAG (conditions as diamonds, `true`/`false` on the edge), a DLT pipeline or a dbt project as lineage in **medallion** frames — fontes → bronze → silver → gold — guessed from names and folders (`raw`, `stg_`, `marts`…). A bundle's pipeline groups exactly the notebooks it lists, and a job's `pipeline_task` names the pipeline it triggers |
+| **agents** | **LangGraph** `StateGraph` (`add_node`, `add_edge`, `add_conditional_edges` — with a path map, or the router's own `return` values, `tools_condition`, `Command(goto=…)`, `ToolNode`, `create_react_agent`; JS `addNode`/`addEdge` too); **CrewAI** (`Agent(role=…)`, `Task(agent=…, context=…)`, `Crew(process=…)`, `@CrewBase`, `config/agents.yaml` + `tasks.yaml`); **OpenAI Agents SDK / Google ADK / pydantic-ai** (`Agent(name=…, tools=…, handoffs=…)`, `sub_agents`, `Sequential`/`Parallel`/`LoopAgent`, `as_tool`, `@function_tool`, `@agent.tool`); **Claude Agent SDK** (`ClaudeAgentOptions(agents={…: AgentDefinition}, mcp_servers=…)`); raw **Messages API** tool use (`tools=[{"name": …}]`); **Claude Code** subagents in `.claude/agents/*.md` | the control flow: start → nodes → end, conditional edges dashed with the router's name, hand-offs thick, tools as hexagons hanging off whoever uses them. Agents that hand off to each other are one system; a file is only read for agents when it imports an LLM framework, so a CRM's `Agent` model stays out |
+
+It is stored under `"modeling"` in `graph.json` — so a PR that adds a foreign key, a
+pipeline task or a hand-off shows up in the map's diff — and the server turns it into
+mermaid on the fly (`erDiagram` for the DER, which croqui now also draws on the UML
+tab). Same stage as the UML tab: zoom, pan, click a table to light up its keys, drag
+cards around, **levar ao mapa**. `croqui context` lists it too, as text, so an
+assistant reading the context knows the pipelines and agent wiring without opening a
+file. `croqui scan --no-modeling` skips it.
 
 ## croqui for an AI
 

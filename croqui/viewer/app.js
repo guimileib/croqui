@@ -6025,8 +6025,20 @@
   // to read one label, how far out before the picture is a smudge.
   var STAGE_MIN = 0.25, STAGE_MAX = 8;
 
+  // The tabs that read documents rather than the map, in strip order. `modeling`
+  // is not a folder: scan derives it from the code (DER, pipelines, agents) and
+  // the server turns it into diagrams, so it reads exactly like the UML tab.
+  var DOC_SECTIONS = ["prd", "uml", "modeling"];
+  var TAB_NAMES = { map: "mapa", prd: "PRD", uml: "UML", modeling: "modelagem" };
+  var MODELING_GROUPS = { der: "modelo de dados", pipeline: "pipelines", agents: "agentes" };
+
   function docSections() {
-    return ["prd", "uml"].filter(function (k) { return (state.docs[k] || []).length; });
+    return DOC_SECTIONS.filter(function (k) { return (state.docs[k] || []).length; });
+  }
+
+  /** The diagram tabs: one document at a time, on a stage you can zoom. */
+  function isStaged(section) {
+    return section === "uml" || section === "modeling";
   }
 
   /** Build the tab strip: only tabs that have something behind them. */
@@ -6041,7 +6053,7 @@
       b.setAttribute("role", "tab");
       b.setAttribute("aria-selected", String(state.tab === key));
       var n = key === "map" ? 0 : state.docs[key].length;
-      b.textContent = key === "map" ? "mapa" : key.toUpperCase();
+      b.textContent = TAB_NAMES[key] || key.toUpperCase();
       if (n > 1) {
         var tally = document.createElement("small");
         tally.textContent = n;
@@ -6085,14 +6097,24 @@
     el.docList.textContent = "";
     // A single document needs no picker; the title above it already names it.
     el.docList.hidden = list.length < 2;
+    var lastGroup = null;
     list.forEach(function (doc, i) {
+      // The modelagem tab mixes three kinds of picture; a heading per kind keeps
+      // the DER, the pipelines and the agents apart in the list.
+      if (doc.group && doc.group !== lastGroup) {
+        lastGroup = doc.group;
+        var h = document.createElement("div");
+        h.className = "doc-group";
+        h.textContent = MODELING_GROUPS[doc.group] || doc.group;
+        el.docList.appendChild(h);
+      }
       var b = document.createElement("button");
       b.className = "doc-item" + (i === state.picked[section] ? " on" : "");
       b.setAttribute("data-doc", i);
       var t = document.createElement("strong");
       t.textContent = doc.title;
       var f = document.createElement("span");
-      f.textContent = doc.name;
+      f.textContent = doc.summary || doc.name;
       b.appendChild(t);
       b.appendChild(f);
       el.docList.appendChild(b);
@@ -6171,11 +6193,12 @@
     renderDocList(section);
     if (el.docBack) el.docBack.hidden = section !== "prd";
     if (el.docTitle) el.docTitle.textContent = doc.title;
-    if (el.docFile) el.docFile.textContent = doc.name;
+    // A modelagem view has no file on disk: say what it is and where it came from.
+    if (el.docFile) el.docFile.textContent = doc.summary || doc.name;
     if (!el.docBody) return;
     el.docBody.textContent = "";
     el.docBody.scrollTop = 0;
-    el.docBody.className = section === "uml" ? "uml" : "prd";
+    el.docBody.className = isStaged(section) ? "uml" : "prd";
     state.stage = null;
 
     if (section === "prd" && doc.format === "html") {
@@ -6195,7 +6218,7 @@
       return;
     }
 
-    if (section === "uml") {
+    if (isStaged(section)) {
       // The whole panel, with its own viewport: this tab has one job, and a
       // diagram you cannot zoom into is a diagram whose relations you cannot read.
       var card = doc.format === "excalidraw" ? drawingCard(doc) : diagramCard(doc.text, doc.name, true);
@@ -6316,8 +6339,9 @@
       wrap.appendChild(sourceBlock(source));
       return wrap;
     }
-    if (model.kind === "flowchart" || model.kind === "sequence") {
-      var svg = model.kind === "flowchart" ? drawFlow(model, stage) : drawSequence(model, stage);
+    if (model.kind === "flowchart" || model.kind === "sequence" || model.kind === "er") {
+      var svg = model.kind === "flowchart" ? drawFlow(model, stage)
+        : model.kind === "er" ? drawEr(model, stage) : drawSequence(model, stage);
       if (stage) wrap.classList.add("full");
       wrap.appendChild(stage ? diagramStage(svg, model) : svg);
       (model.warnings || []).forEach(function (w) { wrap.appendChild(note(w)); });
@@ -6791,6 +6815,105 @@
     });
   }
 
+  /**
+   * A DER: one card per table, drawn by the same pencil as the flowchart.
+   *
+   * The card is a box with a header band (the table's name) and a row per
+   * column: the key (PK/FK) in the table colour, the name, the type faint on the
+   * right. Relations are the flowchart's edges, labelled with the column and the
+   * cardinality, so the stage selects, lights up and moves them exactly as it
+   * does a flowchart's: click a table and its foreign keys light up.
+   */
+  function drawEr(model, stage) {
+    var svg = diagramSvg(model, stage);
+    var links = svgEl("g", { class: "dg-edges" });
+    var boxes = svgEl("g", { class: "dg-nodes" });
+    svg.appendChild(links);
+    svg.appendChild(boxes);
+    var flow = { model: model, nodes: {}, byId: {}, edges: [], frames: [], touching: {} };
+    svg.__flow = flow;
+    model.nodes.forEach(function (n) { flow.byId[n.id] = n; });
+
+    model.edges.forEach(function (e, i) {
+      var a = flow.byId[e.from], b = flow.byId[e.to];
+      if (!a || !b) return;
+      var g = svgEl("g", { class: "dg-edge" + (e.dashed ? " er-inferred" : "") });
+      var path = svgEl("path", {
+        class: "dg-ink", fill: "none", "stroke-dasharray": e.dashed ? "6 4" : null, "stroke-width": 1.6,
+      });
+      g.appendChild(path);
+      var item = { e: e, i: i, g: g, path: path, plate: null, text: null };
+      if (e.label && a !== b) {
+        item.plate = svgEl("rect", { class: "dg-edge-plate", height: 18, rx: 4 });
+        item.text = svgEl("text", { class: "dg-edge-label", "text-anchor": "middle", "font-size": 11 });
+        item.text.textContent = e.label;
+        g.appendChild(item.plate);
+        g.appendChild(item.text);
+      }
+      paintEdge(item, flow.byId);
+      links.appendChild(g);
+      flow.edges.push(item);
+      (flow.touching[e.from] = flow.touching[e.from] || []).push(item);
+      if (e.to !== e.from) (flow.touching[e.to] = flow.touching[e.to] || []).push(item);
+    });
+
+    var HEAD = 30, ROW = 19;
+    model.nodes.forEach(function (n) {
+      var g = svgEl("g", {
+        class: "dg-node er-entity tone-table", "data-id": n.id,
+        transform: "translate(" + n.x + "," + n.y + ")",
+      });
+      var seed = hashCode(n.id);
+      g.appendChild(svgEl("rect", { class: "dg-fill", x: 0, y: 0, width: n.w, height: n.h, rx: 3 }));
+      g.appendChild(svgEl("rect", { class: "er-head", x: 0, y: 0, width: n.w, height: HEAD, rx: 3 }));
+      g.appendChild(svgEl("path", { class: "dg-ink", d: sketchRect(0, 0, n.w, n.h, seed, 1.3), fill: "none" }));
+      g.appendChild(svgEl("path", {
+        class: "dg-ink er-rule", d: sketchPath([[0, HEAD], [n.w, HEAD]], seed + 7, 0.9), fill: "none",
+      }));
+      var title = svgEl("text", {
+        class: "dg-label er-title", x: n.w / 2, y: 20, "text-anchor": "middle", "font-size": 13,
+      });
+      title.textContent = n.label;
+      g.appendChild(title);
+      var y = HEAD + 16;
+      function faint(text) {
+        var t = svgEl("text", { class: "er-type", x: 12, y: y, "font-size": 11 });
+        t.textContent = text;
+        g.appendChild(t);
+      }
+      if (!n.attrs.length) faint("(colunas não lidas)");
+      n.attrs.forEach(function (a) {
+        if (a.more) {
+          faint("\u2026 " + a.more);
+          y += ROW;
+          return;
+        }
+        var pk = a.keys.indexOf("PK") >= 0;
+        if (a.keys.length) {
+          var key = svgEl("text", { class: "er-key" + (pk ? " pk" : ""), x: 12, y: y, "font-size": 10 });
+          key.textContent = a.keys.join(",");
+          g.appendChild(key);
+        }
+        var name = svgEl("text", { class: "er-col" + (pk ? " pk" : ""), x: 12 + (n.keyW || 0), y: y, "font-size": 12 });
+        name.textContent = a.name;
+        if (a.comment) {
+          var tip = svgEl("title", {});
+          tip.textContent = a.comment;
+          name.appendChild(tip);
+        }
+        g.appendChild(name);
+        var type = svgEl("text", { class: "er-type", x: n.w - 12, y: y, "text-anchor": "end", "font-size": 11 });
+        // `*` marks NOT NULL, the way a schema browser does.
+        type.textContent = a.type + (a.comment === "not null" ? " *" : "");
+        g.appendChild(type);
+        y += ROW;
+      });
+      boxes.appendChild(g);
+      flow.nodes[n.id] = g;
+    });
+    return svg;
+  }
+
   function drawSequence(model, stage) {
     var svg = diagramSvg(model, stage);
     var lifelines = svgEl("g", { class: "dg-lifelines" });
@@ -6875,6 +6998,7 @@
     state.docs = {
       prd: (docs && docs.prd) || [],
       uml: (docs && docs.uml) || [],
+      modeling: (docs && docs.modeling) || [],
     };
     // A real copy, not a shallow one: `positions`, `shapes` and `links` are
     // mutated in place from here on, and the caller's object must not be them.
@@ -7045,7 +7169,7 @@
       // Documents are a bonus, never a reason the map fails to open.
       fetch("api/docs")
         .then(function (r) { return r.json(); })
-        .catch(function () { return { prd: [], uml: [] }; }),
+        .catch(function () { return { prd: [], uml: [], modeling: [] }; }),
     ]).then(function (res) {
       var broken = res[1] && res[1].broken;
       boot(res[0], broken ? {} : res[1], !broken, null, res[2]);

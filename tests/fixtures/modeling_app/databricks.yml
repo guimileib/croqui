@@ -1,0 +1,5 @@
+bundle:
+  name: sales_lakehouse
+
+include:
+  - resources/*.yml

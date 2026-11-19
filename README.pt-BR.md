@@ -286,6 +286,7 @@ O que ele desenha hoje:
 |---|---|
 | `graph` / `flowchart` | `TB` `TD` `BT` `LR` `RL`; formas de nó `[]` `()` `([])` `[[]]` `[()]` `(())` `{}` `{{}}` `[//]`; arestas `-->` `---` `-.->` `-.-` `==>` `===` `<-->`; rótulos como `--\>\|texto\|` ou `-- texto -->`; cadeias `A --> B --> C`; leque `A & B --> C & D`; `subgraph … end` com moldura e rótulo; rótulos entre aspas; `<br/>`; comentários `%%` |
 | `sequenceDiagram` | `participant` / `actor`, apelidos com `as`, `->>` `-->>` `->` `-->` `--x`, rótulos de mensagem, `Note over/left of/right of` |
+| `erDiagram` | entidades com colunas `tipo nome PK,FK "comentário"`, relações `A }o--\|\| B : rótulo` (`--` declarada, `..` tracejada), desenhadas como cartões de tabela |
 | qualquer outro | o tipo do diagrama é nomeado e **sua fonte aparece na íntegra** — nunca um painel em branco |
 
 **Cor.** O traço continua o lápis do croqui, mas um nó pode ganhar cor:
@@ -306,6 +307,26 @@ baricentro dentro de cada rank, membros de um subgraph mantidos juntos. Arestas 
 fecham um ciclo — um retry apontando de volta para o que ele repete — são desenhadas mas
 excluídas do ranking, porque um ciclo num passo de caminho mais longo não termina, e
 pará-lo em silêncio num limite de passadas põe nós na faixa errada em vez de falhar alto.
+
+### A aba modelagem
+
+O mapa é abstrato de propósito: um endpoint, os serviços por onde passa, as tabelas no
+fim. A aba **modelagem** é o nível de baixo, e não é uma pasta que você preenche — o
+`croqui scan` a lê do código, do mesmo jeito que lê a API:
+
+| | lido de | desenhado como |
+|---|---|---|
+| **DER** (modelo entidade-relacionamento) | a mesma verdade de DDL e ORM das tabelas do mapa: colunas, tipos, `PK`, `NOT NULL` e chaves estrangeiras — `REFERENCES` na coluna, `FOREIGN KEY (…) REFERENCES` na tabela, `ForeignKey` do ORM. Um `customer_id` sem chave declarada, mas com uma tabela `customers` ao lado, vira uma relação **tracejada, "inferida"** | um cartão por tabela, uma linha por coluna, ligações com a coluna e a cardinalidade (`N:1`). Dividido por schema acima de 40 tabelas |
+| **pipelines** | **Databricks** asset bundles (`resources.jobs.*.tasks` com `depends_on`, `outcome`, tasks de notebook / python / SQL / pipeline / condição / for-each, agendamento) e JSON da Jobs API; **Delta Live Tables / Lakeflow** em Python (`@dlt.table`, `@dp.materialized_view`, `dlt.read[_stream]`, `spark.read.table`, Auto Loader, `create_streaming_table` + `append_flow`, `apply_changes` / `create_auto_cdc_flow`, `@dlt.expect*`) e SQL (`CREATE OR REFRESH STREAMING TABLE … FROM STREAM(LIVE.x)`, `read_files`); **Airflow** (`>>`, `<<`, `chain`, `set_downstream`, TaskFlow `@task`, operadores de branch); **dbt** (`ref`, `source`, `materialized`) | do jeito que o Databricks desenha: um job como o DAG das suas tasks (condições em losango, `true`/`false` na seta), um pipeline DLT ou um projeto dbt como linhagem em molduras **medalhão** — fontes → bronze → silver → gold — deduzidas de nomes e pastas (`raw`, `stg_`, `marts`…). O pipeline de um bundle agrupa exatamente os notebooks que ele lista, e a `pipeline_task` de um job diz qual pipeline dispara |
+| **agentes** | **LangGraph** `StateGraph` (`add_node`, `add_edge`, `add_conditional_edges` — com mapa de caminhos, ou os `return` do próprio roteador, `tools_condition`, `Command(goto=…)`, `ToolNode`, `create_react_agent`; também `addNode`/`addEdge` em JS); **CrewAI** (`Agent(role=…)`, `Task(agent=…, context=…)`, `Crew(process=…)`, `@CrewBase`, `config/agents.yaml` + `tasks.yaml`); **OpenAI Agents SDK / Google ADK / pydantic-ai** (`Agent(name=…, tools=…, handoffs=…)`, `sub_agents`, `Sequential`/`Parallel`/`LoopAgent`, `as_tool`, `@function_tool`, `@agent.tool`); **Claude Agent SDK** (`ClaudeAgentOptions(agents={…: AgentDefinition}, mcp_servers=…)`); tool use direto da **Messages API** (`tools=[{"name": …}]`); subagentes do **Claude Code** em `.claude/agents/*.md` | o fluxo de controle: início → nós → fim, arestas condicionais tracejadas com o nome do roteador, handoffs grossos, ferramentas como hexágonos pendurados em quem as usa. Agentes que passam a vez uns aos outros formam um sistema só; um arquivo só é lido em busca de agentes quando importa um framework de LLM, então o model `Agent` de um CRM fica de fora |
+
+Fica guardado em `"modeling"` no `graph.json` — então um PR que adiciona uma chave
+estrangeira, uma task de pipeline ou um handoff aparece no diff do mapa — e o servidor
+o transforma em mermaid na hora (`erDiagram` para o DER, que agora o croqui também
+desenha na aba UML). O mesmo palco da aba UML: zoom, pan, clique numa tabela para
+acender as chaves dela, arraste os cartões, **levar ao mapa**. O `croqui context` também
+a lista, em texto, então um assistente que lê o contexto conhece os pipelines e a
+ligação dos agentes sem abrir arquivo nenhum. `croqui scan --no-modeling` pula essa parte.
 
 ## croqui para uma IA
 

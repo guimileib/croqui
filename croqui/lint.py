@@ -36,6 +36,7 @@ PALETTE = {
     "route", "service", "repo", "table", "external",
     "get", "post", "put", "patch", "delete",
     "ok", "warn", "danger", "muted", "accent",
+    "bronze", "silver", "gold", "agent", "tool",
 }
 DIRS = {"TB", "TD", "BT", "LR", "RL"}
 STYLE_KEYS = {"fill", "stroke", "color"}
@@ -356,11 +357,13 @@ def lint_text(text: str, file: str = "<texto>") -> list[Issue]:
         _flow(rep, rest, head_line, flow.group(2))
     elif re.match(r"^sequenceDiagram\b", head, re.I):
         _sequence(rep, rest)
+    elif re.match(r"^erDiagram\b", head, re.I):
+        pass  # drawn as table cards (the DER of the modelagem tab); nothing to check past the head
     else:
         word = re.split(r"[\s{]", head)[0]
         name = OTHER_TYPES.get(word.lower(), head[:40])
         rep.add(head_line, WARNING, f"diagrama `{name}` não é desenhado pelo croqui — será mostrado como código; "
-                                    f"use flowchart ou sequenceDiagram")
+                                    f"use flowchart, sequenceDiagram ou erDiagram")
         return rep.issues
     if not has_title:
         rep.add(head_line, INFO, "sem `title:` no frontmatter — a aba usa o nome do arquivo")

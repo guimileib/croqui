@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from .docs import ASSET_TYPES, collect_docs, inline_html_assets, prd_asset
+from .modeling import modeling_docs
 from .model import IMAGE_DIR, IMAGE_MAGIC, IMAGE_TYPES, clean_layout, image_names, safe_image_name
 
 VIEWER = Path(__file__).parent / "viewer"
@@ -132,7 +133,7 @@ def _make_handler(root: Path):
             elif route == "/api/docs":
                 # Read from disk per request, not cached: editing a PRD in your
                 # editor and pressing reload is the entire workflow.
-                self._json(collect_docs(root))
+                self._json(_docs_with_modeling(root, out))
             elif route == "/api/layout":
                 layout = out / LAYOUT_FILE
                 self._send(layout.read_bytes() if layout.is_file() else b"{}", CONTENT_TYPES[".json"])
@@ -204,6 +205,17 @@ def serve(root: Path, *, host: str = "127.0.0.1", port: int = 7777, open_browser
     return 0
 
 
+def _docs_with_modeling(root: Path, out: Path) -> dict:
+    """The document tabs, plus the modelagem views drawn from graph.json."""
+    docs = collect_docs(root)
+    try:
+        graph = json.loads((out / GRAPH_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        graph = {}
+    docs["modeling"] = modeling_docs(graph.get("modeling") if isinstance(graph, dict) else None)
+    return docs
+
+
 def build_bundle(root: Path) -> str:
     """Inline everything into one portable HTML file (read-only view)."""
     out = root / OUT_DIR
@@ -228,6 +240,7 @@ def build_bundle(root: Path) -> str:
         images[name] = "data:" + mime + ";base64," + base64.b64encode(path.read_bytes()).decode("ascii")
 
     docs = collect_docs(root)
+    docs["modeling"] = modeling_docs(graph.get("modeling"))
     # No server behind a bundle, so an HTML PRD brings its pictures and styles along.
     for doc in docs.get("prd", []):
         if doc.get("format") == "html":

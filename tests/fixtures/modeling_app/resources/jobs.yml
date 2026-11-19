@@ -1,0 +1,40 @@
+resources:
+  jobs:
+    daily_sales:
+      name: Daily sales refresh
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"  # every morning
+        timezone_id: UTC
+      tasks:
+        - task_key: ingest
+          notebook_task:
+            notebook_path: ../src/ingest.py
+        - task_key: refresh_dlt
+          depends_on:
+            - task_key: ingest
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.sales_dlt.id}
+        - task_key: check_quality
+          depends_on:
+            - task_key: refresh_dlt
+          condition_task:
+            op: GREATER_THAN
+            left: "{{tasks.refresh_dlt.values.rows}}"
+            right: "0"
+        - task_key: publish
+          depends_on:
+            - task_key: check_quality
+              outcome: "true"
+          sql_task:
+            file:
+              path: ../src/publish.sql
+  pipelines:
+    sales_dlt:
+      name: Sales DLT
+      catalog: main
+      target: sales
+      libraries:
+        - notebook:
+            path: ../src/dlt_sales.py
+        - file:
+            path: ../src/gold_sales.sql
