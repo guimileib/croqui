@@ -33,6 +33,9 @@ COL_PK_RE = re.compile(r"\bPRIMARY\s+KEY\b", re.I)
 COL_NOTNULL_RE = re.compile(r"\bNOT\s+NULL\b", re.I)
 COL_REFS_RE = re.compile(r"\bREFERENCES\s+(?:[a-zA-Z_]\w*\.)?([a-zA-Z_]\w*)", re.I)
 TABLE_PK_RE = re.compile(r"\bPRIMARY\s+KEY\s*\(([^)]*)\)", re.I)
+TABLE_FK_RE = re.compile(
+    r"\bFOREIGN\s+KEY\s*\(([^)]*)\)\s*REFERENCES\s+(?:[`\"]?[a-zA-Z_]\w*[`\"]?\.)?[`\"]?([a-zA-Z_]\w*)", re.I
+)
 ORM_COLUMN_CALLS = {"Column", "mapped_column", "deferred"}
 SCHEMA_KW_RE = re.compile(r"""["']schema["']\s*:\s*["'](\w+)["']""")
 
@@ -164,12 +167,18 @@ def _ddl_columns(body: str) -> list[dict]:
     """Column name, type and the three flags worth showing, from a CREATE TABLE."""
     columns: list[dict] = []
     table_pk: set[str] = set()
+    table_fk: dict[str, str] = {}
     for part in _split_top_level(body):
         flat = " ".join(part.split())
         if CONSTRAINT_RE.match(flat):
             found = TABLE_PK_RE.search(flat)
             if found:
                 table_pk.update(c.strip().strip('"').lower() for c in found.group(1).split(","))
+            # `FOREIGN KEY (a) REFERENCES t(id)`: the DER draws its line from this.
+            fk = TABLE_FK_RE.search(flat)
+            if fk:
+                for col in fk.group(1).split(","):
+                    table_fk[col.strip().strip('"`').lower()] = fk.group(2)
             continue
         name, _, rest = flat.partition(" ")
         name = name.strip('"').strip("`").strip("[]")
@@ -188,6 +197,8 @@ def _ddl_columns(body: str) -> list[dict]:
     for column in columns:
         if column["name"].lower() in table_pk:
             column["pk"] = True
+        if column["name"].lower() in table_fk and not column.get("references"):
+            column["references"] = table_fk[column["name"].lower()]
     return columns
 
 

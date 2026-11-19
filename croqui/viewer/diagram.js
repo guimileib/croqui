@@ -46,6 +46,8 @@
     route: 1, service: 1, repo: 1, table: 1, external: 1,
     get: 1, post: 1, put: 1, patch: 1, "delete": 1,
     ok: 1, warn: 1, danger: 1, muted: 1, accent: 1,
+    // The modelagem tab: medallion layers of a lakehouse, and the parts of an agent.
+    bronze: 1, silver: 1, gold: 1, agent: 1, tool: 1,
   };
   var COLOR_VALUE = /^(#[0-9a-f]{3,8}|(rgb|rgba|hsl|hsla)\([0-9.,%\s]+\)|[a-z]{3,20})$/i;
   var STYLE_KEYS = { fill: "fill", stroke: "stroke", color: "color" };
@@ -653,6 +655,144 @@
     return { width: Math.round(width), height: Math.round(height), frames: frames, rank: rank };
   }
 
+  /* --------------------------------------------------------------- erDiagram
+   *
+   * The modelagem tab's DER, and any `erDiagram` someone writes in the UML folder.
+   * An entity is a table card: its name on top, then one row per column with the
+   * key (PK/FK/UK), the name and the type. A relation is a line between two cards,
+   * labelled with its column and its cardinality read off mermaid's crow's-foot
+   * tokens (`}o--||` is "many to one"). `..` instead of `--` draws it dashed,
+   * which croqui uses for a foreign key inferred from a `*_id` name rather than
+   * declared.
+   *
+   * Layout reuses the flowchart's: entities joined by relations are ranked left
+   * to right along their foreign keys, so facts sit left of the dimensions they
+   * point at. Tables with no relation at all would otherwise stack into one tall
+   * column; they are packed into a grid underneath instead. */
+
+  var ER_ENTITY = /^([A-Za-z_][\w.\-]*)\s*(?:\[\s*"?([^"\]]*)"?\s*\])?\s*\{\s*$/;
+  var ER_BARE = /^([A-Za-z_][\w.\-]*)\s*(?:\[\s*"?([^"\]]*)"?\s*\])?\s*$/;
+  var ER_REL = /^([A-Za-z_][\w.\-]*)\s+(\|o|\|\||\}o|\}\|)(--|\.\.)(o\||\|\||o\{|\|\{)\s+([A-Za-z_][\w.\-]*)\s*(?::\s*(.*))?$/;
+  var ER_ATTR = /^(\S+)\s+([A-Za-z_*][\w\-]*)((?:\s+(?:PK|FK|UK)(?:\s*,\s*(?:PK|FK|UK))*)?)(?:\s+"([^"]*)")?\s*$/;
+  var ER_HEAD = 32, ER_ROW = 19, ER_PAD = 12, ER_KEY_W = 26, ER_MIN_W = 150;
+
+  function erSide(token) {
+    // `}` / `{` is the crow's foot: many. `o` alone is optional, `|` mandatory.
+    return /[{}]/.test(token) ? "N" : "1";
+  }
+
+  function erMeasure(entity) {
+    var nameW = 0, typeW = 0, keys = false;
+    entity.attrs.forEach(function (a) {
+      if (a.more) { nameW = Math.max(nameW, a.more.length * CHAR_W * 0.95); return; }
+      nameW = Math.max(nameW, a.name.length * CHAR_W);
+      typeW = Math.max(typeW, a.type.length * CHAR_W * 0.88);
+      if (a.keys.length) keys = true;
+    });
+    var head = entity.label.length * CHAR_W * 1.08 + ER_PAD * 2;
+    var body = ER_PAD * 2 + (keys ? ER_KEY_W : 0) + nameW + (typeW ? 18 + typeW : 0);
+    entity.keyW = keys ? ER_KEY_W : 0;
+    entity.nameW = Math.round(nameW);
+    entity.w = Math.round(Math.max(ER_MIN_W, head, body));
+    entity.h = ER_HEAD + Math.max(1, entity.attrs.length) * ER_ROW + 10;
+  }
+
+  function parseEr(lines, warnings) {
+    var entities = {}, order = [], edges = [];
+    var open = null;
+
+    function touch(id, label) {
+      var e = entities[id];
+      if (!e) {
+        e = entities[id] = { id: id, label: id, attrs: [] };
+        order.push(id);
+      }
+      if (label) e.label = label;
+      return e;
+    }
+
+    lines.forEach(function (raw) {
+      var line = raw.replace(/%%.*$/, "").trim();
+      if (!line) return;
+      if (open) {
+        if (line === "}") { open = null; return; }
+        if (line.charAt(0) === "…") { open.attrs.push({ more: line.slice(1).trim(), keys: [] }); return; }
+        var a = ER_ATTR.exec(line);
+        if (!a) { warnings.push("coluna que não entendi: " + line); return; }
+        open.attrs.push({
+          type: a[1], name: a[2],
+          keys: (a[3] || "").split(/[\s,]+/).filter(Boolean),
+          comment: a[4] || "",
+        });
+        return;
+      }
+      var ent = ER_ENTITY.exec(line);
+      if (ent) { open = touch(ent[1], ent[2]); return; }
+      var rel = ER_REL.exec(line);
+      if (rel) {
+        touch(rel[1]); touch(rel[5]);
+        var label = (rel[6] || "").trim().replace(/^"|"$/g, "");
+        var card = erSide(rel[2]) + ":" + erSide(rel[4]);
+        edges.push({
+          from: rel[1], to: rel[5],
+          label: label ? label + " · " + card : card,
+          column: label, card: card,
+          dashed: rel[3] === "..", thick: false, invisible: false, heads: "end",
+        });
+        return;
+      }
+      var bare = ER_BARE.exec(line);
+      if (bare && !/^(title|direction)\b/i.test(line)) { touch(bare[1], bare[2]); return; }
+      if (!/^(title|direction)\b/i.test(line)) warnings.push("linha que não entendi: " + line);
+    });
+    if (open) warnings.push("entidade sem `}`: " + open.id);
+
+    var nodes = order.map(function (id) {
+      var e = entities[id];
+      erMeasure(e);
+      var rows = e.attrs.map(function (a) {
+        return a.more ? "… " + a.more : (a.keys.length ? a.keys.join(",") + " " : "") + a.name + ": " + a.type;
+      });
+      return {
+        id: id, label: e.label, shape: "rect", sub: null, tone: "table",
+        w: e.w, h: e.h, keyW: e.keyW, nameW: e.nameW, attrs: e.attrs,
+        // What "levar ao mapa" writes inside the rectangle.
+        lines: [e.label, "—"].concat(rows),
+      };
+    });
+
+    var linked = {};
+    edges.forEach(function (e) { linked[e.from] = true; linked[e.to] = true; });
+    var joined = nodes.filter(function (n) { return linked[n.id]; });
+    var loose = nodes.filter(function (n) { return !linked[n.id]; });
+    var width = MARGIN * 2, height = MARGIN;
+    if (joined.length) {
+      var box = place({ nodes: joined, edges: edges, subs: [] }, "LR");
+      width = box.width;
+      height = box.height;
+    }
+    if (loose.length) {
+      // A grid roughly as wide as the linked part, or square when there is none.
+      var cols = Math.max(1, Math.ceil(Math.sqrt(loose.length)));
+      var avgW = loose.reduce(function (s, n) { return s + n.w; }, 0) / loose.length;
+      if (joined.length) cols = Math.max(1, Math.min(loose.length, Math.floor((width - MARGIN * 2) / (avgW + NODE_GAP)) || 1));
+      var top = joined.length ? height : MARGIN, x = MARGIN, rowH = 0, col = 0;
+      loose.forEach(function (n) {
+        if (col === cols) { col = 0; x = MARGIN; top += rowH + NODE_GAP; rowH = 0; }
+        n.x = Math.round(x); n.y = Math.round(top);
+        x += n.w + NODE_GAP;
+        rowH = Math.max(rowH, n.h);
+        width = Math.max(width, x - NODE_GAP + MARGIN);
+        col++;
+      });
+      height = top + rowH + MARGIN;
+    }
+    return {
+      kind: "er", dir: "LR", nodes: nodes, edges: edges, frames: [],
+      width: Math.round(width), height: Math.round(height), warnings: warnings,
+    };
+  }
+
   /* ----------------------------------------------------------- sequence */
 
   /* The arrow has to be found before the names, not after: a participant id may
@@ -807,6 +947,13 @@
         nodes: model.nodes, edges: model.edges, frames: box.frames,
         width: box.width, height: box.height, warnings: warnings, source: text,
       };
+    }
+
+    if (/^erDiagram\b/i.test(first)) {
+      var er = parseEr(lines.slice(head + 1), warnings);
+      if (!er.nodes.length) return { kind: "empty", warnings: warnings, source: text };
+      er.source = text;
+      return er;
     }
 
     if (/^sequenceDiagram\b/i.test(first)) {

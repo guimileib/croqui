@@ -10,6 +10,7 @@ import datetime
 import json
 from pathlib import Path
 
+from .modeling import modeling_text
 from .docs import collect_docs
 from .scaffold import MARKER, RELATION_FILE, target_dir
 
@@ -199,6 +200,8 @@ def build(root: Path, graph: dict, *, full: bool = False) -> dict:
         "tables": tables,
         "external": _plain("external"),
         "docs": {"prd": _docs("prd"), "uml": _docs("uml")},
+        # DER, pipelines and agents, as `croqui scan` found them (the modelagem tab).
+        "modeling": graph.get("modeling") or {},
         "writing": writing_guide(root),
     }
 
@@ -323,6 +326,15 @@ def render(ctx: dict, *, full: bool = False) -> str:
                 where = f"  `{node['source']}`" if node.get("source") else ""
                 add(f"- **{node['label']}**{tail}{where}")
             add("")
+
+    modeled = modeling_text(ctx.get("modeling"))
+    if modeled:
+        add("## modelagem")
+        add("")
+        add("Uma camada abaixo do mapa: tabelas e chaves estrangeiras, pipelines de dados")
+        add("(Databricks, Delta Live Tables, Airflow, dbt) e sistemas de agentes, lidos do código.")
+        add("")
+        lines.extend(modeled)
 
     docs = ctx.get("docs") or {}
     if docs.get("prd") or docs.get("uml"):

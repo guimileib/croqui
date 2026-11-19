@@ -73,6 +73,9 @@ class Graph:
         self.project = project
         self.nodes: dict[str, dict] = {}
         self._edges: dict[tuple[str, str, str], dict] = {}
+        # The modelagem tab: DER, pipelines and agents (see modeling.py). Not
+        # nodes of the map: they sit beside it, under their own key.
+        self.modeling: dict | None = None
 
     def add_node(self, node_id: str, kind: str, label: str, group: str | None = None, **meta) -> dict:
         node = self.nodes.get(node_id)
@@ -141,13 +144,16 @@ class Graph:
         order = {kind: i for i, kind in enumerate(KIND_ORDER)}
         nodes = sorted(self.nodes.values(), key=lambda n: (order.get(n["kind"], 99), n["label"]))
         edges = sorted(self.edges, key=lambda e: (e["from"], e["to"], e["kind"]))
-        return {
+        out = {
             "croqui": SCHEMA_VERSION,
             "project": self.project,
             "stats": self.counts(),
             "nodes": nodes,
             "edges": edges,
         }
+        if self.modeling and any(self.modeling.get(k) for k in ("entities", "pipelines", "agents")):
+            out["modeling"] = self.modeling
+        return out
 
     def write(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
