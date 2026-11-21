@@ -327,6 +327,15 @@ cards around, **levar ao mapa**. `croqui context` lists it too, as text, so an
 assistant reading the context knows the pipelines and agent wiring without opening a
 file. `croqui scan --no-modeling` skips it.
 
+### The modelagem PRD tab
+
+The modelagem tab shows the data model the code *has*; **modelagem PRD** shows the
+one the PRDs *ask for*. Every ```` ```mermaid ```` block that is an `erDiagram` inside a
+PRD (markdown, or `<pre class="mermaid">` in an HTML PRD) gets its own zoomable stage
+there, named after the PRD and the heading above it. The PRD still draws it inline.
+`croqui prd` now writes a `## Modelo de dados` section with that diagram, and
+`croqui context` / the MCP tool tell an assistant writing a PRD to do the same.
+
 ## croqui for an AI
 
 The viewer answers a person's questions by being a picture. A model cannot look at a

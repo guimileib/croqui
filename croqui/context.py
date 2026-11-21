@@ -222,7 +222,10 @@ def writing_guide(root: Path) -> dict:
         "prd": {
             "where": f"{prd_dir}/*.md",
             "how": "Markdown. O primeiro título vira o nome do documento na aba PRD. "
-                   "Um bloco ```mermaid dentro do PRD é desenhado ali mesmo.",
+                   "Um bloco ```mermaid dentro do PRD é desenhado ali mesmo. "
+                   "Inclua uma seção `## Modelo de dados` com o DER num bloco ```mermaid "
+                   "`erDiagram` (entidades, colunas com PK/FK, relações com cardinalidade): "
+                   "ele aparece também na aba \"modelagem PRD\", com zoom.",
         },
         "uml": {
             "where": f"{uml_dir}/*.mmd",
