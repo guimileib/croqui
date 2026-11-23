@@ -4705,11 +4705,15 @@
     } catch (err) {
       return { error: "não consegui ler o diagrama — " + (err && err.message || err) };
     }
-    if (model.kind === "flowchart" || model.kind === "sequence") return mermaidDrawing(model, frontTitle(source));
+    // An erDiagram's tables already carry the lines "levar ao mapa" writes in them,
+    // so a DER dropped on the map lands the same way the tabs send one there.
+    if (model.kind === "flowchart" || model.kind === "sequence" || model.kind === "er") {
+      return mermaidDrawing(model, frontTitle(source));
+    }
     if (model.kind === "empty") return { error: "diagrama vazio" + (name ? " em " + name : "") };
     if (model.kind === "broken") return { error: "não consegui ler o diagrama — " + model.message };
     return { error: "croqui ainda não desenha " + (model.diagram || "este tipo de diagrama") +
-      " — use .excalidraw, flowchart ou sequenceDiagram" };
+      " — use .excalidraw, flowchart, sequenceDiagram ou erDiagram" };
   }
 
   /** The box an imported item covers, with a line's direction folded away. */
