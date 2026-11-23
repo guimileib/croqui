@@ -673,7 +673,9 @@
   var ER_ENTITY = /^([A-Za-z_][\w.\-]*)\s*(?:\[\s*"?([^"\]]*)"?\s*\])?\s*\{\s*$/;
   var ER_BARE = /^([A-Za-z_][\w.\-]*)\s*(?:\[\s*"?([^"\]]*)"?\s*\])?\s*$/;
   var ER_REL = /^([A-Za-z_][\w.\-]*)\s+(\|o|\|\||\}o|\}\|)(--|\.\.)(o\||\|\||o\{|\|\{)\s+([A-Za-z_][\w.\-]*)\s*(?::\s*(.*))?$/;
-  var ER_ATTR = /^(\S+)\s+([A-Za-z_*][\w\-]*)((?:\s+(?:PK|FK|UK)(?:\s*,\s*(?:PK|FK|UK))*)?)(?:\s+"([^"]*)")?\s*$/;
+  // A type may carry a precision with a space in it, `decimal(10, 2)`, as an LLM writing
+  // a PRD tends to.
+  var ER_ATTR = /^([^\s(]+(?:\([^)]*\))?\S*)\s+([A-Za-z_*][\w\-]*)((?:\s+(?:PK|FK|UK)(?:\s*,\s*(?:PK|FK|UK))*)?)(?:\s+"([^"]*)")?\s*$/;
   var ER_HEAD = 32, ER_ROW = 19, ER_PAD = 12, ER_KEY_W = 26, ER_MIN_W = 150;
 
   function erSide(token) {

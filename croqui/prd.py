@@ -56,6 +56,14 @@ que alguém consegue de fato executar.
 Ligue cada capacidade aos endpoints e tabelas concretos que a implementam. É aqui que
 o PRD e o mapa se encontram, então cite nomes reais.
 
+## Modelo de dados
+O DER do sistema num único bloco ```mermaid com `erDiagram`, só com as tabelas que
+aparecem no mapa: cada entidade com as colunas que o mapa mostra (tipo e nome, `PK`
+e `FK` onde couber) e as relações entre elas com a cardinalidade
+(`CLIENTE ||--o{{ PEDIDO : faz`). Depois do bloco, uma frase por relação que não é
+óbvia pelo nome. Se o mapa não tem tabela nenhuma, escreva isso em uma linha e não
+desenhe o bloco.
+
 ## Perguntas em aberto
 O que o código não responde: regra de negócio que só uma pessoa sabe, decisão que
 parece deliberada mas não está explicada, ligação que o mapa marca como incerta.
@@ -66,6 +74,8 @@ Regras, e elas importam mais que o formato:
   escreva isso em *Perguntas em aberto* em vez de preencher com plausibilidade.
 - Onde você estiver deduzindo em vez de lendo, diga. "Pelo mapa, parece que…" é uma
   frase melhor que uma afirmação errada com cara de certa.
+- No `erDiagram`, nomes de entidade e de coluna sem espaço nem acento
+  (`tb_pedidos`, `criado_em`); o texto livre vai depois dos dois pontos da relação.
 - Sem preâmbulo e sem despedida. Comece no `# PRD` e termine no fim da última seção.
 - Não envolva a resposta inteira numa cerca de código.
 """

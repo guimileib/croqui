@@ -6028,8 +6028,11 @@
   // The tabs that read documents rather than the map, in strip order. `modeling`
   // is not a folder: scan derives it from the code (DER, pipelines, agents) and
   // the server turns it into diagrams, so it reads exactly like the UML tab.
-  var DOC_SECTIONS = ["prd", "uml", "modeling"];
-  var TAB_NAMES = { map: "mapa", prd: "PRD", uml: "UML", modeling: "modelagem" };
+  // `prd_model` is the DER each PRD carries in an erDiagram block, lifted out of the
+  // prose onto a stage of its own: the data model the PRD *asks for*, next to the
+  // one `modeling` reads from the code.
+  var DOC_SECTIONS = ["prd", "prd_model", "uml", "modeling"];
+  var TAB_NAMES = { map: "mapa", prd: "PRD", prd_model: "modelagem PRD", uml: "UML", modeling: "modelagem" };
   var MODELING_GROUPS = { der: "modelo de dados", pipeline: "pipelines", agents: "agentes" };
 
   function docSections() {
@@ -6038,7 +6041,7 @@
 
   /** The diagram tabs: one document at a time, on a stage you can zoom. */
   function isStaged(section) {
-    return section === "uml" || section === "modeling";
+    return section === "uml" || section === "modeling" || section === "prd_model";
   }
 
   /** Build the tab strip: only tabs that have something behind them. */
@@ -6999,6 +7002,7 @@
       prd: (docs && docs.prd) || [],
       uml: (docs && docs.uml) || [],
       modeling: (docs && docs.modeling) || [],
+      prd_model: (docs && docs.prd_model) || [],
     };
     // A real copy, not a shallow one: `positions`, `shapes` and `links` are
     // mutated in place from here on, and the caller's object must not be them.
@@ -7169,7 +7173,7 @@
       // Documents are a bonus, never a reason the map fails to open.
       fetch("api/docs")
         .then(function (r) { return r.json(); })
-        .catch(function () { return { prd: [], uml: [], modeling: [] }; }),
+        .catch(function () { return { prd: [], uml: [], modeling: [], prd_model: [] }; }),
     ]).then(function (res) {
       var broken = res[1] && res[1].broken;
       boot(res[0], broken ? {} : res[1], !broken, null, res[2]);

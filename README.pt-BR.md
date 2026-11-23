@@ -328,6 +328,16 @@ acender as chaves dela, arraste os cartões, **levar ao mapa**. O `croqui contex
 a lista, em texto, então um assistente que lê o contexto conhece os pipelines e a
 ligação dos agentes sem abrir arquivo nenhum. `croqui scan --no-modeling` pula essa parte.
 
+### A aba modelagem PRD
+
+A aba modelagem mostra o modelo de dados que o código *tem*; a **modelagem PRD** mostra
+o que os PRDs *pedem*. Todo bloco ```` ```mermaid ```` com `erDiagram` dentro de um PRD
+(markdown, ou `<pre class="mermaid">` num PRD em HTML) ganha ali um palco próprio, com
+zoom, com o nome do PRD e do título logo acima dele. O PRD continua desenhando o
+diagrama no meio do texto. O `croqui prd` agora escreve uma seção `## Modelo de dados`
+com esse diagrama, e o `croqui context` e a ferramenta MCP pedem o mesmo a um
+assistente que escreve um PRD.
+
 ## croqui para uma IA
 
 O visualizador responde às perguntas de uma pessoa sendo um desenho. Um modelo não

@@ -129,6 +129,72 @@ def collect_section(root: Path, section: str) -> list[dict]:
     return found
 
 
+# A ```mermaid fence whose diagram is an erDiagram, in a markdown PRD. In an HTML
+# PRD, the same diagram inside <pre class="mermaid"> or <div class="mermaid">.
+_MD_FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})\s*mermaid\b[^\n]*\n([\s\S]*?)^\s{0,3}\1\s*$", re.MULTILINE)
+_HTML_MERMAID_RE = re.compile(r"<(pre|div)\b[^>]*class\s*=\s*[\"'][^\"']*\bmermaid\b[^\"']*[\"'][^>]*>([\s\S]*?)</\1>",
+                              re.IGNORECASE)
+_ER_START_RE = re.compile(r"^\s*(?:---\s*\n[\s\S]*?\n---\s*\n)?\s*(?:%%[^\n]*\n\s*)*erDiagram\b")
+_ER_ENTITY_RE = re.compile(r"^\s*\"?([A-Za-z_][\w.-]*)\"?\s*(?:\[[^\]]*\]\s*)?\{", re.MULTILINE)
+_ER_REL_RE = re.compile(r"^\s*\"?([A-Za-z_][\w.-]*)\"?\s+[|}o][|o]?(?:--|\.\.)[|o{][|{]?\s+\"?([A-Za-z_][\w.-]*)\"?",
+                        re.MULTILINE)
+# The heading just above a diagram names it better than the PRD's title does.
+_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
+
+
+def _er_blocks(doc: dict) -> list[tuple[str, str | None]]:
+    """Each erDiagram in one PRD, with the nearest heading above it."""
+    text = doc.get("text") or ""
+    out: list[tuple[str, str | None]] = []
+    if doc.get("format") == "html":
+        for m in _HTML_MERMAID_RE.finditer(text):
+            body = html.unescape(re.sub(r"<[^>]+>", "", m.group(2)))
+            if _ER_START_RE.match(body):
+                out.append((body.strip("\n"), None))
+        return out
+    if doc.get("format") != "markdown":
+        return out
+    for m in _MD_FENCE_RE.finditer(text):
+        body = m.group(2)
+        if not _ER_START_RE.match(body):
+            continue
+        headings = [h.group(1).strip() for h in _HEADING_RE.finditer(text, 0, m.start())]
+        # The H1 is the PRD's own name, not the diagram's.
+        heading = headings[-1] if len(headings) > 1 else None
+        out.append((body.rstrip("\n"), heading))
+    return out
+
+
+def prd_models(prd_docs: list[dict]) -> list[dict]:
+    """The "modelagem PRD" tab: every erDiagram written inside a PRD, one view each.
+
+    The PRD still shows it inline, in the flow of the text; this tab puts it on a
+    stage of its own, where a DER of twenty tables can be zoomed and read.
+    """
+    found: list[dict] = []
+    for doc in prd_docs or []:
+        blocks = _er_blocks(doc)
+        for i, (body, heading) in enumerate(blocks):
+            entities = set(_ER_ENTITY_RE.findall(body))
+            for a, b in _ER_REL_RE.findall(body):
+                entities.update((a, b))
+            entities.discard("erDiagram")
+            title = doc.get("title") or doc.get("name") or "PRD"
+            if heading and heading.lower() not in title.lower():
+                title = f"{title} — {heading}"
+            if len(blocks) > 1 and not heading:
+                title = f"{title} ({i + 1})"
+            found.append({
+                "name": f"{doc.get('name')}#der{'' if i == 0 else f'-{i + 1}'}",
+                "title": title,
+                "format": "markdown",
+                "summary": f"{len(entities)} entidades · de {doc.get('name')}",
+                "source": doc.get("name"),
+                "text": body,
+            })
+    return found
+
+
 def collect_docs(root: Path) -> dict:
     """The whole document set, ready to hand to the viewer."""
     return {section: collect_section(root, section) for section in SECTIONS}

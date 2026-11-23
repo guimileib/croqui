@@ -82,7 +82,10 @@ TOOLS = [
             "Write a document into prd/ (markdown) or uml/ (mermaid). This is how you leave "
             "something behind that the map cannot derive: a requirement, a decision, a diagram "
             "of how it is *meant* to work. Refuses to overwrite an existing document unless "
-            "`overwrite` is true, and never touches croqui's own generated diagram."
+            "`overwrite` is true, and never touches croqui's own generated diagram. A PRD should "
+            "carry its data model as a `## Modelo de dados` section with a ```mermaid `erDiagram` "
+            "block (entities, columns with PK/FK, relations with cardinality): the viewer also "
+            "shows it on its own zoomable tab, \"modelagem PRD\"."
         ),
         "inputSchema": {
             "type": "object",

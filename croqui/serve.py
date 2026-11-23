@@ -13,7 +13,7 @@ from pathlib import Path
 
 from urllib.parse import unquote
 
-from .docs import ASSET_TYPES, collect_docs, inline_html_assets, prd_asset
+from .docs import ASSET_TYPES, collect_docs, inline_html_assets, prd_asset, prd_models
 from .modeling import modeling_docs
 from .model import IMAGE_DIR, IMAGE_MAGIC, IMAGE_TYPES, clean_layout, image_names, safe_image_name
 
@@ -213,6 +213,7 @@ def _docs_with_modeling(root: Path, out: Path) -> dict:
     except (OSError, ValueError):
         graph = {}
     docs["modeling"] = modeling_docs(graph.get("modeling") if isinstance(graph, dict) else None)
+    docs["prd_model"] = prd_models(docs.get("prd", []))
     return docs
 
 
@@ -241,6 +242,7 @@ def build_bundle(root: Path) -> str:
 
     docs = collect_docs(root)
     docs["modeling"] = modeling_docs(graph.get("modeling"))
+    docs["prd_model"] = prd_models(docs.get("prd", []))
     # No server behind a bundle, so an HTML PRD brings its pictures and styles along.
     for doc in docs.get("prd", []):
         if doc.get("format") == "html":
