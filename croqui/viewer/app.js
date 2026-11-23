@@ -2428,9 +2428,10 @@
   /** The id of the table node with this name, or null when it is off the map. */
   function tableNamed(name) {
     var want = String(name || "").toLowerCase();
-    var hit = (state.graph.nodes || []).filter(function (n) {
-      return n.kind === "table" && String(n.label).toLowerCase() === want;
-    })[0];
+    var tables = (state.graph.nodes || []).filter(function (n) { return n.kind === "table"; });
+    // `schema.name` is the node's id; a bare name is its label.
+    var hit = tables.filter(function (n) { return String(n.id).toLowerCase() === "table:" + want; })[0] ||
+      tables.filter(function (n) { return String(n.label).toLowerCase() === want; })[0];
     return hit ? hit.id : null;
   }
 
