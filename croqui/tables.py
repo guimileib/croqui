@@ -31,10 +31,11 @@ COL_TAIL_RE = re.compile(
 )
 COL_PK_RE = re.compile(r"\bPRIMARY\s+KEY\b", re.I)
 COL_NOTNULL_RE = re.compile(r"\bNOT\s+NULL\b", re.I)
-COL_REFS_RE = re.compile(r"\bREFERENCES\s+(?:[a-zA-Z_]\w*\.)?([a-zA-Z_]\w*)", re.I)
+# The referenced table keeps its schema when the DDL writes one: `REFERENCES users_v3.person`.
+COL_REFS_RE = re.compile(r"\bREFERENCES\s+((?:[a-zA-Z_]\w*\.)?[a-zA-Z_]\w*)", re.I)
 TABLE_PK_RE = re.compile(r"\bPRIMARY\s+KEY\s*\(([^)]*)\)", re.I)
 TABLE_FK_RE = re.compile(
-    r"\bFOREIGN\s+KEY\s*\(([^)]*)\)\s*REFERENCES\s+(?:[`\"]?[a-zA-Z_]\w*[`\"]?\.)?[`\"]?([a-zA-Z_]\w*)", re.I
+    r"\bFOREIGN\s+KEY\s*\(([^)]*)\)\s*REFERENCES\s+((?:[`\"]?[a-zA-Z_]\w*[`\"]?\.)?[`\"]?[a-zA-Z_]\w*)", re.I
 )
 ORM_COLUMN_CALLS = {"Column", "mapped_column", "deferred"}
 SCHEMA_KW_RE = re.compile(r"""["']schema["']\s*:\s*["'](\w+)["']""")
@@ -48,25 +49,42 @@ SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cach
 KIND_BY_DDL = {"TABLE": "table", "VIEW": "view", "MATERIALIZED VIEW": "matview"}
 
 
+def _key(name: str, schema: str | None) -> str:
+    return f"{schema}.{name}".lower() if schema else name.lower()
+
+
 class TableRegistry:
-    """Case-insensitive lookup of known database objects."""
+    """Case-insensitive lookup of known database objects, one per ``schema.name``.
+
+    The same name in two schemas (``access_v3.module``, ``internal_v3.module``) is two
+    objects. A name without a schema stands for the one object of that name, if there
+    is exactly one.
+    """
 
     def __init__(self) -> None:
-        # bare name -> record
-        self._by_name: dict[str, dict] = {}
+        # "schema.name" (bare "name" when no schema is known) -> record
+        self._by_key: dict[str, dict] = {}
+        # bare name -> every record with that name, whatever the schema
+        self._by_bare: dict[str, list[dict]] = {}
 
     # ------------------------------------------------------------------ build
 
     def add(self, name: str, *, schema: str | None, kind: str, source: str) -> dict:
-        key = name.lower()
-        rec = self._by_name.get(key)
+        same = self._by_bare.setdefault(name.lower(), [])
+        if schema:
+            rec = self._by_key.get(_key(name, schema))
+            if rec is None and len(same) == 1 and not same[0]["schema"]:
+                # DDL knows the schema better than a bare ORM ``__tablename__`` does.
+                rec = self._by_key.pop(_key(name, None))
+                rec["schema"] = schema
+                self._by_key[_key(name, schema)] = rec
+        else:
+            rec = same[0] if len(same) == 1 else self._by_key.get(_key(name, None))
         if rec is None:
             rec = {"name": name, "schema": schema, "kind": kind, "sources": [], "columns": []}
-            self._by_name[key] = rec
+            self._by_key[_key(name, schema)] = rec
+            same.append(rec)
         rec.setdefault("columns", [])
-        # DDL knows the schema better than a bare ORM ``__tablename__`` does.
-        if schema and not rec["schema"]:
-            rec["schema"] = schema
         if kind != "table" and rec["kind"] == "table":
             rec["kind"] = kind
         if source not in rec["sources"]:
@@ -74,8 +92,8 @@ class TableRegistry:
         return rec
 
     def set_columns(self, name: str, columns: list[dict], *, authoritative: bool) -> None:
-        """Attach a column list; DDL wins over an ORM model."""
-        rec = self._by_name.get(name.lower())
+        """Attach a column list; DDL wins over an ORM model. ``name`` may be ``schema.name``."""
+        rec = self.resolve(name)
         if rec is None or not columns:
             return
         if rec["columns"] and not (authoritative and not rec.get("columns_from_ddl")):
@@ -86,9 +104,22 @@ class TableRegistry:
     # ------------------------------------------------------------------ query
 
     def resolve(self, name: str) -> dict | None:
-        """Look up a bare or qualified name. Returns None if unknown."""
-        bare = name.split(".")[-1].strip('"').lower()
-        return self._by_name.get(bare)
+        """Look up a bare or qualified name. Returns None if unknown or ambiguous.
+
+        ``schema.name`` hits that schema; failing that, it falls back to the only object
+        of that name. A bare name is the only object of that name, else the one declared
+        without a schema, else ``public``'s.
+        """
+        parts = [p.strip().strip('"').lower() for p in name.split(".")]
+        bare, schema = parts[-1], (parts[-2] if len(parts) > 1 else None)
+        if schema and _key(bare, schema) in self._by_key:
+            return self._by_key[_key(bare, schema)]
+        same = self._by_bare.get(bare, [])
+        if len(same) == 1:
+            return same[0]
+        if schema:
+            return None
+        return self._by_key.get(bare) or self._by_key.get(_key(bare, "public"))
 
     def qualified(self, name: str) -> str:
         rec = self.resolve(name)
@@ -97,10 +128,10 @@ class TableRegistry:
         return f"{rec['schema']}.{rec['name']}" if rec["schema"] else rec["name"]
 
     def __len__(self) -> int:
-        return len(self._by_name)
+        return len(self._by_key)
 
     def all(self) -> list[dict]:
-        return sorted(self._by_name.values(), key=lambda r: (r["schema"] or "", r["name"]))
+        return sorted(self._by_key.values(), key=lambda r: (r["schema"] or "", r["name"]))
 
 
 def _iter_files(root: Path, suffixes: tuple[str, ...]) -> list[Path]:
@@ -178,7 +209,7 @@ def _ddl_columns(body: str) -> list[dict]:
             fk = TABLE_FK_RE.search(flat)
             if fk:
                 for col in fk.group(1).split(","):
-                    table_fk[col.strip().strip('"`').lower()] = fk.group(2)
+                    table_fk[col.strip().strip('"`').lower()] = fk.group(2).replace('"', "").replace("`", "")
             continue
         name, _, rest = flat.partition(" ")
         name = name.strip('"').strip("`").strip("[]")
@@ -247,7 +278,8 @@ def _orm_columns(text: str) -> dict[str, list[dict]]:
                 rendered = _ast_type(arg)
                 if isinstance(arg, ast.Call) and _ast_type(arg.func) == "ForeignKey":
                     target = arg.args[0].value if arg.args and isinstance(arg.args[0], ast.Constant) else ""
-                    column["references"] = str(target).split(".")[0] or None
+                    # `ForeignKey("schema.table.column")`: everything but the column.
+                    column["references"] = str(target).rsplit(".", 1)[0] or None
                 elif column["type"] is None and rendered and not isinstance(arg, ast.Constant):
                     column["type"] = rendered
             if column["type"] is None and isinstance(stmt, ast.AnnAssign):
@@ -280,7 +312,9 @@ def build_registry(root: Path, *, code_suffixes: tuple[str, ...] = (".py",)) -> 
             registry.add(match.group("name"), schema=match.group("schema"), kind=kind, source=rel)
             body = _paren_block(text, match.end()) if kind == "table" else None
             if body:
-                registry.set_columns(match.group("name"), _ddl_columns(body), authoritative=True)
+                registry.set_columns(
+                    _key(match.group("name"), match.group("schema")), _ddl_columns(body), authoritative=True
+                )
 
     # 2. ORM models. The schema usually sits in __table_args__ a few lines away.
     for code_file in _iter_files(root, code_suffixes):
@@ -296,13 +330,9 @@ def build_registry(root: Path, *, code_suffixes: tuple[str, ...] = (".py",)) -> 
                 continue
             window = "\n".join(lines[max(0, idx - 12) : idx + 12])
             schema_m = SCHEMA_KW_RE.search(window)
-            registry.add(
-                m.group(1),
-                schema=schema_m.group(1) if schema_m else None,
-                kind="table",
-                source=f"{rel}:{idx + 1}",
-            )
-            registry.set_columns(m.group(1), by_table.get(m.group(1), []), authoritative=False)
+            schema = schema_m.group(1) if schema_m else None
+            registry.add(m.group(1), schema=schema, kind="table", source=f"{rel}:{idx + 1}")
+            registry.set_columns(_key(m.group(1), schema), by_table.get(m.group(1), []), authoritative=False)
 
     # 3. Qualified references in code. These do not *prove* existence, but a
     #    schema-qualified tb_/mv_ token is specific enough to trust as a

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -12,7 +13,7 @@ from croqui.modeling import (
     modeling_docs,
     modeling_text,
 )
-from croqui.tables import build_registry
+from croqui.tables import TableRegistry, build_registry
 
 FIXTURE = Path(__file__).parent / "fixtures" / "modeling_app"
 
@@ -55,6 +56,80 @@ class DerTests(unittest.TestCase):
         self.assertIn("erDiagram", der["text"])
         self.assertIn('orders }|--|| customers : "customer_id"', der["text"])
         self.assertIn("order_items }o..|| products", der["text"])  # inferred: dashed
+
+
+SCHEMAS_DDL = """
+CREATE TABLE access_v3.module (module_code text PRIMARY KEY, name text);
+CREATE TABLE internal_v3.module (module_code text PRIMARY KEY, action text);
+CREATE TABLE access_v3.profile_module (
+    profile_code text,
+    module_code text REFERENCES module(module_code)
+);
+CREATE TABLE internal_v3.staff (staff_id uuid PRIMARY KEY);
+CREATE TABLE legacy.staff (id integer PRIMARY KEY);
+CREATE TABLE internal_v3.staff_module (
+    staff_id uuid,
+    module_code text,
+    CONSTRAINT fk_staff_module FOREIGN KEY (module_code) REFERENCES internal_v3.module(module_code)
+);
+CREATE TABLE users_v3.person (user_id uuid PRIMARY KEY);
+CREATE TABLE access_v3.store_access (id uuid PRIMARY KEY, user_id uuid REFERENCES users_v3.person(user_id));
+CREATE TABLE security.tb_user (id integer PRIMARY KEY);
+"""
+
+SCHEMAS_ORM = '''
+class Session(Base):
+    __tablename__ = "tb_session"
+    __table_args__ = {"schema": "security"}
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("security.tb_user.id"))
+'''
+
+
+class SchemaQualifiedTests(unittest.TestCase):
+    """Same table name in two schemas: two tables, each with its own columns and lines."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "schema.sql").write_text(SCHEMAS_DDL, encoding="utf-8")
+            (root / "models.py").write_text(SCHEMAS_ORM, encoding="utf-8")
+            cls.registry = build_registry(root, code_suffixes=(".py",))
+            cls.model = build_modeling(root, cls.registry)
+
+    def _rel(self, source: str, column: str) -> dict:
+        return next(r for r in self.model["relations"] if r["from"] == source and r["column"] == column)
+
+    def test_same_name_in_two_schemas_stays_two_tables(self) -> None:
+        cols = {e["id"]: [c["name"] for c in e["columns"]] for e in self.model["entities"]}
+        self.assertEqual(cols["access_v3.module"], ["module_code", "name"])
+        self.assertEqual(cols["internal_v3.module"], ["module_code", "action"])
+
+    def test_qualified_reference_hits_its_schema(self) -> None:
+        self.assertEqual(self._rel("internal_v3.staff_module", "module_code")["to"], "internal_v3.module")
+        self.assertEqual(self._rel("access_v3.store_access", "user_id")["to"], "users_v3.person")
+
+    def test_bare_reference_prefers_its_own_schema(self) -> None:
+        self.assertEqual(self._rel("access_v3.profile_module", "module_code")["to"], "access_v3.module")
+        inferred = self._rel("internal_v3.staff_module", "staff_id")
+        self.assertEqual((inferred["to"], inferred["confidence"]), ("internal_v3.staff", "inferred"))
+
+    def test_orm_foreign_key_keeps_the_schema(self) -> None:
+        self.assertEqual(self._rel("security.tb_session", "user_id")["to"], "security.tb_user")
+
+    def test_resolve(self) -> None:
+        self.assertEqual(self.registry.resolve("internal_v3.module")["schema"], "internal_v3")
+        self.assertEqual(self.registry.qualified('"access_v3"."module"'), "access_v3.module")
+        self.assertIsNone(self.registry.resolve("module"))  # ambiguous without a schema
+        self.assertEqual(self.registry.qualified("person"), "users_v3.person")  # the only one
+
+    def test_schema_backfills_a_bare_record(self) -> None:
+        registry = TableRegistry()
+        registry.add("orders", schema=None, kind="table", source="models.py:3")
+        registry.add("orders", schema="sales", kind="table", source="schema.sql")
+        self.assertEqual(len(registry), 1)
+        self.assertEqual(registry.qualified("orders"), "sales.orders")
 
 
 class PipelineTests(unittest.TestCase):

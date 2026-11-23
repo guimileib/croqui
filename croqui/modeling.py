@@ -274,7 +274,14 @@ def build_entities(registry: TableRegistry) -> dict:
     """Tables, columns and relations — declared foreign keys first, `x_id` names after."""
     records = [r for r in registry.all() if r.get("kind") in ("table", None)]
     views = [r for r in registry.all() if r.get("kind") in ("view", "matview")]
-    by_lower = {r["name"].lower(): r for r in records}
+    # The same name can live in several schemas: a bare name prefers the table's own.
+    by_lower: dict[str, list[dict]] = {}
+    for r in records:
+        by_lower.setdefault(r["name"].lower(), []).append(r)
+
+    def named(name: str, schema: str | None) -> dict | None:
+        same = by_lower.get(name, [])
+        return next((r for r in same if r.get("schema") == schema), None) or (same[0] if len(same) == 1 else None)
 
     def qualified(rec: dict) -> str:
         return f"{rec['schema']}.{rec['name']}" if rec.get("schema") else rec["name"]
@@ -305,13 +312,17 @@ def build_entities(registry: TableRegistry) -> dict:
         for col in ent["columns"]:
             target, confidence = None, "static"
             if col.get("references"):
-                target = registry.resolve(col["references"])
+                ref = col["references"]
+                if "." not in ref:
+                    target = named(ref.lower(), rec.get("schema"))
+                target = target or registry.resolve(ref)
             else:
                 m = FK_SUFFIX_RE.match(col["name"])
                 if m and not col.get("pk"):
                     for form in _plural_forms(m.group("stem")):
-                        if form in by_lower and by_lower[form] is not rec:
-                            target, confidence = by_lower[form], "inferred"
+                        candidate = named(form, rec.get("schema"))
+                        if candidate is not None and candidate is not rec:
+                            target, confidence = candidate, "inferred"
                             break
             if target is None:
                 continue

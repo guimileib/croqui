@@ -586,7 +586,7 @@ def _sa_columns(cls: ast.ClassDef) -> list[dict]:
             if isinstance(arg, ast.Call) and _tail(arg.func) == "ForeignKey":
                 target = _const_str(arg.args[0]) if arg.args else None
                 if target:
-                    column["references"] = target.split(".")[0]
+                    column["references"] = target.rsplit(".", 1)[0]  # `schema.table.column` keeps the schema
             elif column["type"] is None and not isinstance(arg, ast.Constant):
                 column["type"] = _type_name(arg)
         if column["type"] is None and isinstance(stmt, ast.AnnAssign):

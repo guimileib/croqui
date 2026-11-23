@@ -242,7 +242,7 @@ def _columns(meta: dict) -> list[str]:
         if col.get("pk"):
             line += "  PK"
         if col.get("references"):
-            line += f"  → {str(col['references'])[:14]}"
+            line += f"  → {str(col['references']).split('.')[-1][:14]}"  # the card has no room for the schema
         lines.append(line)
     if len(cols) > MAX_COLUMNS:
         lines.append(f"… +{len(cols) - MAX_COLUMNS} colunas")
