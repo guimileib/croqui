@@ -7,7 +7,7 @@ import tomllib
 import unittest
 from pathlib import Path
 
-from croqui.agents import BODY, TARGETS, _gemini_command, install
+from croqui.agents import BODY, SKILLS, TARGETS, _gemini_command, install
 
 
 class SkillTests(unittest.TestCase):
@@ -19,9 +19,15 @@ class SkillTests(unittest.TestCase):
             self.assertEqual(tools, {"claude", "codex", "gemini"})
             for _, path in written:
                 text = path.read_text(encoding="utf-8")
-                self.assertIn("croqui draw", text, path.name)
-                self.assertIn("croqui lint", text, path.name)
                 self.assertNotIn("{request}", text)
+                if "croqui-plan" in str(path):
+                    self.assertIn("croqui next --done", text, path)
+                else:
+                    self.assertIn("croqui draw", text, path.name)
+                    self.assertIn("croqui lint", text, path.name)
+            # Both commands, for every tool.
+            self.assertEqual(sum("croqui-plan" in str(p) for _, p in written), 3)
+            self.assertEqual(len(written), 6)
 
     def test_gemini_toml_is_valid(self) -> None:
         data = tomllib.loads(_gemini_command())
@@ -34,6 +40,11 @@ class SkillTests(unittest.TestCase):
         self.assertLess(body.index("croqui draw"), body.index("Writing one by hand"))
         self.assertLess(body.index("croqui lint"), body.index("croqui build ."))
         self.assertIn("%% croqui:gerado", body)
+
+    def test_plan_command_is_valid_for_gemini(self) -> None:
+        data = tomllib.loads(_gemini_command(SKILLS[1]))
+        self.assertIn("{{args}}", data["prompt"])
+        self.assertIn("croqui plan --manual", data["prompt"])
 
     def test_stays_short(self) -> None:
         # The skill is read by the model on every use; the previous version was 544 words.

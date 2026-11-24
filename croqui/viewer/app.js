@@ -5555,6 +5555,7 @@
     });
     on(el.lost, "click", backToContent);
     window.addEventListener("resize", syncLost);
+    window.addEventListener("resize", fitHeader);
     on(el.undo, "click", undo);
     on(el.redo, "click", redo);
     on(el.clearFocus, "click", function () { setFocus(null); });
@@ -6100,6 +6101,26 @@
     });
     // One tab is no choice at all.
     el.tabs.hidden = wanted.length < 2;
+    fitHeader();
+  }
+
+  /**
+   * Keep the drawing tools clear of the islands beside them. How wide the left
+   * island is depends on how many tabs the project has, so no breakpoint can
+   * know: measure, drop the project line first, then send the tools below.
+   */
+  function fitHeader() {
+    var tools = document.getElementById("tools");
+    var left = document.getElementById("island-left"), right = document.getElementById("island-right");
+    if (!tools || !left || !right) return;
+    function crowded() {
+      var t = tools.getBoundingClientRect();
+      return left.getBoundingClientRect().right + 10 > t.left || right.getBoundingClientRect().left - 10 < t.right;
+    }
+    document.body.classList.remove("tight", "tools-low");
+    if (!tools.offsetWidth) return;  // hidden while a document is open
+    if (crowded()) document.body.classList.add("tight");
+    if (crowded()) document.body.classList.add("tools-low");
   }
 
   /** Chrome that only means anything over the map. */
@@ -6123,6 +6144,7 @@
     state.tab = tab;
     syncTabs();
     syncTabChrome();
+    fitHeader();
     if (tab === "prd" && state.picked.prd < 0) openGallery();
     else if (tab !== "map") openDoc(tab, state.picked[tab] || 0);
   }
@@ -7204,7 +7226,7 @@
     metaEl.textContent = graph.project.name + " · " + (counts.route || !counts.module
       ? (counts.route || 0) + " endpoints · " + (counts.table || 0) + " tabelas"
       : counts.module + " módulos" + (counts.table ? " · " + counts.table + " tabelas" : ""));
-    document.title = "croqui — " + graph.project.name;
+    document.title = "croqui | " + graph.project.name;
     // Hidden on narrower screens; the brand still answers on hover.
     document.getElementById("brand").title = metaEl.textContent;
 

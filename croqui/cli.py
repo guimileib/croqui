@@ -319,6 +319,21 @@ def cmd_prd(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_plan(args: argparse.Namespace) -> int:
+    """One request, written as a PRD of steps for agents to work in relay."""
+    from .plan import draft
+
+    return draft(Path(args.path).resolve(), args.request, engine=args.engine,
+                 manual=args.manual, dry_run=args.dry_run, say=_say)
+
+
+def cmd_next(args: argparse.Namespace) -> int:
+    """The next open step of a plan, or tick one off."""
+    from .plan import next_step
+
+    return next_step(Path(args.path).resolve(), plan=args.plan, done=args.done, note=args.note, say=_say)
+
+
 def cmd_engines(args: argparse.Namespace) -> int:
     """What this machine can talk to — the answer to "which LLM does croqui use"."""
     from .llm import available
@@ -536,6 +551,30 @@ def build_parser() -> argparse.ArgumentParser:
     p_prd.add_argument("--dry-run", action="store_true",
                        help="say which engine and which file, call nothing")
     p_prd.set_defaults(func=cmd_prd)
+
+    p_plan = subs.add_parser(
+        "plan",
+        help="break one request into a PRD of steps that agents work one after another",
+    )
+    p_plan.add_argument("request", help="what has to be done, in your words")
+    p_plan.add_argument("--path", default=".")
+    p_plan.add_argument("--engine", default="auto",
+                        help="auto (default), or a name from `croqui engines`")
+    p_plan.add_argument("--manual", action="store_true",
+                        help="write the skeleton to fill in by hand, call no model")
+    p_plan.add_argument("--dry-run", action="store_true",
+                        help="say which engine and which file, call nothing")
+    p_plan.set_defaults(func=cmd_plan)
+
+    p_next = subs.add_parser(
+        "next",
+        help="print the next open step of a plan; --done N ticks one off",
+    )
+    p_next.add_argument("path", nargs="?", default=".")
+    p_next.add_argument("--plan", default="", help="part of the plan's file name (default: the oldest with open steps)")
+    p_next.add_argument("--done", type=int, metavar="N", help="mark step N as done")
+    p_next.add_argument("--note", default="", help="with --done: what changed and what the next agent needs to know")
+    p_next.set_defaults(func=cmd_next)
 
     p_engines = subs.add_parser("engines", help="list the models this machine can talk to")
     p_engines.set_defaults(func=cmd_engines)
