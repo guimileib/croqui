@@ -15,3 +15,6 @@ shot.png
 docs
 .gradle/
 target/
+
+# CLAUDE
+.claude
