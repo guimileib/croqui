@@ -268,5 +268,5 @@ def build_bundle(root: Path) -> str:
         '<script src="app.js"></script>',
         f"<script>window.__CROQUI__ = {payload};</script>\n<script>\n{js}\n</script>",
     )
-    html = html.replace("<title>croqui</title>", f"<title>croqui — {graph['project']['name']}</title>")
+    html = html.replace("<title>croqui</title>", f"<title>croqui | {graph['project']['name']}</title>")
     return html

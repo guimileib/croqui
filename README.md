@@ -67,6 +67,8 @@ croqui scan       # analyse the source  -> .croqui/graph.json
 croqui serve      # open the editable map on localhost:7777
 croqui build      # one self-contained .html — map + PRD + diagrams, no server
 croqui prd        # write the PRD from the map, with whatever model you have
+croqui plan       # break one request into a PRD of steps, for agents to work in relay
+croqui next       # the next open step of that plan; --done N ticks one off
 croqui context    # the same map as text, for an LLM's context window
 croqui draw       # a styled diagram of an endpoint, table or module, from the map (mermaid or excalidraw)
 croqui lint       # check a mermaid or excalidraw file against what the UML tab actually draws
@@ -399,6 +401,28 @@ colour as meaning, checked with `croqui lint` until clean. It is built to be che
 things) instead of crawling the source, opens at most three files for what the map
 cannot say, and never calls `enrich`/`prd` unless asked. Then `croqui build .` makes
 the page. `croqui install --uninstall` removes the files.
+
+### One request, a PRD of steps, worked in relay: `croqui plan` and `croqui next`
+
+```sh
+croqui plan "export orders as CSV"   # writes prd/pedido-<date>-<time>-<slug>.md
+croqui next                          # prints the first open step, and the notes before it
+croqui next --done 1 --note "route in orders.py; pagination still missing"
+```
+
+`croqui plan` hands the request and the map to whatever model the machine has and
+writes a PRD for that one request: what it touches, then 2 to 8 steps, each a
+`### [ ] N. title` heading with what to do, the files, and how to verify it. It shows
+in the PRD tab like any other. `--manual` writes the skeleton and calls no model.
+
+croqui runs no agent — the file is the hand-off. One agent does a step and ticks it
+with a note; the next one, in another session or another tool, runs `croqui next` and
+gets that step's text plus what the agents before it left behind. Requests queue:
+the oldest plan with an open step is the one being worked.
+
+`croqui install` also writes **`/croqui-plan`** (`$croqui-plan` in Codex) next to
+`/croqui`. Its description makes the assistant do this on every implementation
+request: look for open work, write the plan before any code, then one step at a time.
 
 ### Diagrams for free: `croqui draw` and `croqui lint`
 

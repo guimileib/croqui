@@ -684,16 +684,17 @@
   }
 
   function erMeasure(entity) {
-    var nameW = 0, typeW = 0, keys = false;
+    var nameW = 0, typeW = 0, keyW = 0;
     entity.attrs.forEach(function (a) {
       if (a.more) { nameW = Math.max(nameW, a.more.length * CHAR_W * 0.95); return; }
       nameW = Math.max(nameW, a.name.length * CHAR_W);
       typeW = Math.max(typeW, a.type.length * CHAR_W * 0.88);
-      if (a.keys.length) keys = true;
+      // `PK,FK` is wider than the column kept for one key: widen it, or it runs into the name.
+      if (a.keys.length) keyW = Math.max(keyW, ER_KEY_W, a.keys.join(",").length * 6.6 + 10);
     });
     var head = entity.label.length * CHAR_W * 1.08 + ER_PAD * 2;
-    var body = ER_PAD * 2 + (keys ? ER_KEY_W : 0) + nameW + (typeW ? 18 + typeW : 0);
-    entity.keyW = keys ? ER_KEY_W : 0;
+    var body = ER_PAD * 2 + keyW + nameW + (typeW ? 18 + typeW : 0);
+    entity.keyW = Math.round(keyW);
     entity.nameW = Math.round(nameW);
     entity.w = Math.round(Math.max(ER_MIN_W, head, body));
     entity.h = ER_HEAD + Math.max(1, entity.attrs.length) * ER_ROW + 10;

@@ -68,6 +68,8 @@ croqui scan       # analisa o código   -> .croqui/graph.json
 croqui serve      # abre o mapa editável em localhost:7777
 croqui build      # um .html autocontido — mapa + PRD + diagramas, sem servidor
 croqui prd        # escreve o PRD a partir do mapa, com o modelo que você tiver
+croqui plan       # quebra um pedido num PRD de etapas, para agentes trabalharem em revezamento
+croqui next       # a próxima etapa em aberto desse plano; --done N marca uma como feita
 croqui context    # o mesmo mapa em texto, para o contexto de um LLM
 croqui draw       # um diagrama já estilizado de um endpoint, tabela ou módulo (mermaid ou excalidraw)
 croqui lint       # confere um mermaid ou excalidraw contra o que a aba UML realmente desenha
@@ -401,6 +403,29 @@ com significado, conferido com `croqui lint` até ficar limpo. Ele foi feito par
 coisas) em vez de vasculhar o código, abre no máximo três arquivos para o que o mapa não
 responde, e nunca chama `enrich`/`prd` sem você pedir. Depois `croqui build .` gera a
 página. `croqui install --uninstall` remove os arquivos.
+
+### Um pedido, um PRD de etapas, feito em revezamento: `croqui plan` e `croqui next`
+
+```sh
+croqui plan "exportar pedidos em CSV"   # escreve prd/pedido-<data>-<hora>-<slug>.md
+croqui next                             # mostra a primeira etapa em aberto, e as notas anteriores
+croqui next --done 1 --note "rota em orders.py; falta paginar"
+```
+
+O `croqui plan` entrega o pedido e o mapa ao modelo que a máquina tiver e escreve um
+PRD só para aquele pedido: o que ele toca e depois de 2 a 8 etapas, cada uma com um
+cabeçalho `### [ ] N. título`, o que fazer, os arquivos e como verificar. Ele aparece
+na aba PRD como qualquer outro. `--manual` escreve o esqueleto sem chamar modelo.
+
+O croqui não executa agente nenhum — o arquivo é a passagem de bastão. Um agente faz
+uma etapa e a marca com uma nota; o próximo, em outra sessão ou outra ferramenta, roda
+`croqui next` e recebe o texto da etapa seguinte mais o que os anteriores deixaram.
+Os pedidos fazem fila: o plano mais antigo com etapa em aberto é o que está em andamento.
+
+O `croqui install` também grava o **`/croqui-plan`** (`$croqui-plan` no Codex) ao lado
+do `/croqui`. A descrição dele faz o assistente seguir isso a cada pedido de
+implementação: procurar trabalho em aberto, escrever o plano antes de qualquer código
+e então fazer uma etapa de cada vez.
 
 ### Diagramas de graça: `croqui draw` e `croqui lint`
 

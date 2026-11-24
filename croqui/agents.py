@@ -7,6 +7,10 @@ One instruction text, written in each tool's own format:
                ``~/.codex/prompts/croqui.md``        -> ``/prompts:croqui <request>``
 * Gemini CLI   ``~/.gemini/commands/croqui.toml``    -> ``/croqui <request>``
 
+Next to it goes ``croqui-plan``, in the same places: the instruction that makes an
+assistant turn every implementation request into a PRD of steps (``croqui plan``) and
+work it one step at a time (``croqui next``), so the next agent picks up the hand-off.
+
 ``--project`` writes the same files under the current repository instead of $HOME.
 """
 
@@ -106,44 +110,103 @@ the diagram unless asked.
 """
 
 
+PLAN_DESCRIPTION = (
+    "Turn a request to implement, build, fix or change code into a PRD of steps and work it "
+    "one step at a time, handing off to the next agent. Use on every implementation request, "
+    "when the user types /croqui-plan, or asks to continue, resume or pick up pending work."
+)
+PLAN_HINT = 'what to implement, e.g. "export orders as CSV" (empty: continue the open plan)'
+
+PLAN_BODY = """# croqui-plan: one request, one PRD of steps, worked in relay
+
+Request: {request}
+
+Another agent may have started this work and you may not finish it. The plan file is
+the hand-off: nothing that matters may live only in your conversation.
+
+## 1. Look for open work first
+
+Run `croqui next`. If it prints a step, that plan is not finished: do that step (go
+to 3) unless the request above is clearly a different piece of work.
+
+## 2. A new request gets a plan before any code
+
+- Run `croqui plan --manual "<the request, in the user's words>"`. It creates
+  `prd/pedido-<date>-<slug>.md` and prints the path.
+- Fill that file in: **Contexto** from the code (`croqui context` is the map, as
+  text), then 2 to 8 steps. Keep each heading exactly `### [ ] N. Title`, with
+  **O que fazer**, **Arquivos** and **Como verificar** under it. A step is a change
+  that ships and is verified on its own, written for someone who read only this file.
+- Show the user the list of steps in a few lines before starting.
+
+## 3. One step at a time
+
+- `croqui next` prints the step to do and the notes of the steps before it.
+- Implement that step only, then run its **Como verificar**.
+- `croqui next --done N --note "what changed, what the next agent must know"`:
+  files touched, decisions taken, anything left half-done. No note, no hand-off.
+- Stop after the step when the user asked for one step, when verification fails, or
+  when the next step needs a decision that is theirs. Otherwise take the next one.
+
+Reply in the user's language: which step you did, how it was verified, what is next.
+"""
+
+# name, description, argument hint, body: every command `croqui install` writes.
+SKILLS = [
+    ("croqui", DESCRIPTION, ARGUMENT_HINT, BODY),
+    ("croqui-plan", PLAN_DESCRIPTION, PLAN_HINT, PLAN_BODY),
+]
+
+
 def _yaml(text: str) -> str:
     """A single-quoted YAML scalar: safe for the colons and quotes in our text."""
     return "'" + text.replace("'", "''") + "'"
 
 
-def _skill(request: str) -> str:
+def _skill(spec: tuple, request: str) -> str:
+    name, description, hint, body = spec
     return (
-        f"---\nname: croqui\ndescription: {_yaml(DESCRIPTION)}\nargument-hint: {_yaml(ARGUMENT_HINT)}\n---\n\n"
-        + BODY.format(request=request)
+        f"---\nname: {name}\ndescription: {_yaml(description)}\nargument-hint: {_yaml(hint)}\n---\n\n"
+        + body.format(request=request)
     )
 
 
-def _codex_prompt() -> str:
+def _codex_prompt(spec: tuple) -> str:
+    _, description, hint, body = spec
     return (
-        f"---\ndescription: {_yaml(DESCRIPTION)}\nargument-hint: {_yaml(ARGUMENT_HINT)}\n---\n\n"
-        + BODY.format(request="$ARGUMENTS")
+        f"---\ndescription: {_yaml(description)}\nargument-hint: {_yaml(hint)}\n---\n\n"
+        + body.format(request="$ARGUMENTS")
     )
 
 
-def _gemini_command() -> str:
-    body = BODY.format(request="{{args}}")
+def _gemini_command(spec: tuple = SKILLS[0]) -> str:
+    _, description, _, body = spec
+    body = body.format(request="{{args}}")
     # TOML multi-line literal strings cannot contain three single quotes in a row.
     assert "'''" not in body
-    return f'description = "{DESCRIPTION}"\n' + "prompt = '''\n" + body + "'''\n"
+    return f'description = "{description}"\n' + "prompt = '''\n" + body + "'''\n"
 
 
-TARGETS = {
-    "claude": [(".claude/skills/croqui/SKILL.md", lambda: _skill("$ARGUMENTS"))],
-    "codex": [
-        (".agents/skills/croqui/SKILL.md", lambda: _skill("the text after $croqui in the user's message")),
-        (".codex/prompts/croqui.md", _codex_prompt),
-    ],
-    "gemini": [(".gemini/commands/croqui.toml", _gemini_command)],
-}
+def _targets(tool: str) -> list:
+    out = []
+    for spec in SKILLS:
+        name = spec[0]
+        if tool == "claude":
+            out.append((f".claude/skills/{name}/SKILL.md", lambda spec=spec: _skill(spec, "$ARGUMENTS")))
+        elif tool == "codex":
+            out.append((f".agents/skills/{name}/SKILL.md",
+                        lambda spec=spec: _skill(spec, f"the text after ${spec[0]} in the user's message")))
+            out.append((f".codex/prompts/{name}.md", lambda spec=spec: _codex_prompt(spec)))
+        else:
+            out.append((f".gemini/commands/{name}.toml", lambda spec=spec: _gemini_command(spec)))
+    return out
+
+
+TARGETS = {tool: _targets(tool) for tool in ("claude", "codex", "gemini")}
 USAGE = {
-    "claude": "/croqui <pedido>",
-    "codex": "$croqui <pedido>  ou  /prompts:croqui <pedido>",
-    "gemini": "/croqui <pedido>",
+    "claude": "/croqui <desenho>   /croqui-plan <pedido>",
+    "codex": "$croqui <desenho>  ou  /prompts:croqui <desenho>   $croqui-plan <pedido>",
+    "gemini": "/croqui <desenho>   /croqui-plan <pedido>",
 }
 # A tool counts as present when its home folder exists.
 MARKERS = {"claude": ".claude", "codex": ".codex", "gemini": ".gemini"}

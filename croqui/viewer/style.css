@@ -673,6 +673,15 @@ body.space-pan #canvas, body.space-pan #canvas .node, body.space-pan #canvas .sh
   #toast { bottom: 72px; }
   #lost { bottom: 116px; }
 }
+/* The same two steps when it is the tabs, not the window, that crowd the tools
+   (`fitHeader`). */
+body.tight #brand small { display: none; }
+body.tools-low #tools { top: auto; bottom: 12px; max-width: calc(100vw - 24px); overflow-x: auto; }
+body.tools-low #zoom { bottom: 64px; }
+body.tools-low #help-btn { bottom: 64px; }
+body.tools-low #legend { bottom: 112px; }
+body.tools-low #toast { bottom: 72px; }
+body.tools-low #lost { bottom: 116px; }
 @media (max-width: 720px) {
   #brand small, #brand .word { display: none; }
   #search { width: 120px; }
