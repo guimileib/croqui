@@ -139,9 +139,10 @@ def cmd_scan(args: argparse.Namespace) -> int:
         _say(f"  {DIM}· {warning}{RESET}")
 
     if not getattr(args, "no_modeling", False):
-        from .modeling import build_modeling, summary
+        from .modeling import add_agents, build_modeling, summary
 
         graph.modeling = build_modeling(root, registry)
+        add_agents(graph, graph.modeling["agents"])
         found = summary(graph.modeling)
         parts = [
             f"{found[key]} {word}"

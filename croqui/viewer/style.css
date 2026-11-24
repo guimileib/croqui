@@ -26,6 +26,8 @@
   --delete: #c92a2a;
   --group: #343a40;
   --service: #7048e8;
+  --agent: #ae3ec9;
+  --tool: #5c940d;
   --repo: #0c8599;
   --table: #d9820b;
   --external: #6c757d;
@@ -62,6 +64,8 @@
     --delete: #ff6b6b;
     --group: #ced4da;
     --service: #b197fc;
+    --agent: #e599f7;
+    --tool: #a9e34b;
     --repo: #3bc9db;
     --table: #ffc078;
     --external: #adb5bd;
@@ -87,6 +91,8 @@
   --delete: #ff6b6b;
   --group: #ced4da;
   --service: #b197fc;
+  --agent: #e599f7;
+  --tool: #a9e34b;
   --repo: #3bc9db;
   --table: #ffc078;
   --external: #adb5bd;
@@ -1400,6 +1406,8 @@ body.reading-prd #doc-list { display: none; }
    panning. */
 .dg-stage { cursor: default; }
 .dg-stage .dg-node { cursor: move; }
+.dg-bend { fill: var(--paper); stroke: var(--ink-soft); stroke-width: 1.5; opacity: 0.7; cursor: move; }
+.dg-bend:hover { stroke: var(--accent); opacity: 1; }
 body.space-pan .dg-stage, body.space-pan .dg-stage .dg-node { cursor: grab; }
 .dg-stage.panning, .dg-stage.panning .dg-node { cursor: grabbing; }
 .dg-tip {

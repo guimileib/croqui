@@ -20,8 +20,9 @@ runs, and a construct that cannot be read is skipped rather than guessed. Each
 finding keeps a ``file:line`` so the tab can say where it came from.
 
 The result is a plain dict stored under ``"modeling"`` in graph.json. The viewer's
-*modelagem* tab draws it from :func:`modeling_docs`, which turns it into mermaid
-the existing renderer already knows (plus ``erDiagram``, added for this).
+*modelagem* tab draws the DER and the pipelines from :func:`modeling_docs`, which
+turns them into mermaid the existing renderer already knows (plus ``erDiagram``,
+added for this). Agent systems go on the map instead, as nodes (:func:`add_agents`).
 """
 
 from __future__ import annotations
@@ -1682,6 +1683,30 @@ def build_agents(root: Path) -> list[dict]:
     return list(unique.values())
 
 
+AGENT_TOOL_TYPES = ("tool", "tools", "mcp")
+
+
+def add_agents(graph, systems: list[dict]) -> None:
+    """Put each agent system on the map: agents and steps as `agent` nodes, what they use as `tool`."""
+    for system in systems or []:
+        ids = {
+            n["id"]: f"{'tool' if n['type'] in AGENT_TOOL_TYPES else 'agent'}:{system['id']}:{n['id']}"
+            for n in system["nodes"]
+            if n["type"] not in ("start", "end")
+        }
+        for n in system["nodes"]:
+            if n["id"] not in ids:
+                continue
+            graph.add_node(
+                ids[n["id"]], "tool" if n["type"] in AGENT_TOOL_TYPES else "agent", n["label"],
+                group=system["name"], role=n["type"], framework=AGENT_KIND.get(system["kind"], system["kind"]),
+                source=n.get("evidence") or system["source"], summary=n.get("detail") or n.get("doc"),
+            )
+        for e in system["edges"]:
+            if e["from"] in ids and e["to"] in ids and e["from"] != e["to"]:
+                graph.add_edge(ids[e["from"]], ids[e["to"]], "calls", ops=[e["label"]] if e.get("label") else None)
+
+
 # ===================================================================== entry
 
 
@@ -1846,45 +1871,6 @@ def pipeline_mermaid(pipe: dict) -> str:
     return "---\n" + "\n".join(head) + "\n---\n" + "\n".join(lines) + "\n"
 
 
-NODE_SHAPE = {
-    "start": ('(["', '"])'), "end": ('(["', '"])'), "tool": ('{{"', '"}}'), "tools": ('[["', '"]]'),
-    "mcp": ('[("', '")]'), "router": ('{"', '"}'), "subgraph": ('[["', '"]]'), "orchestrator": ('[["', '"]]'),
-}
-NODE_TONE = {
-    "start": "muted", "end": "muted", "agent": "agent", "orchestrator": "agent", "tool": "tool",
-    "tools": "tool", "mcp": "external", "task": "service", "subgraph": "accent", "node": "service",
-}
-NODE_ICON = {"agent": "🤖", "orchestrator": "🧭", "tool": "🔧", "tools": "🧰", "task": "📋", "mcp": "🔌"}
-
-
-def agents_mermaid(system: dict) -> str:
-    ids: dict[str, str] = {}
-    direction = "TB" if system["kind"] in ("langgraph", "crewai") else "LR"
-    lines = [f"flowchart {direction}"]
-    for n in system["nodes"]:
-        nid = _mid("a_", n["id"], ids)
-        label = n["label"]
-        icon = NODE_ICON.get(n["type"])
-        if icon:
-            label = f"{icon} {label}"
-        extras = [str(x)[:52] for x in (n.get("detail"), n.get("doc")) if x]
-        if n.get("output"):
-            extras.append(f"→ {n['output']}")
-        if extras:
-            label += "<br>" + "<br>".join(extras[:2])
-        open_, close = NODE_SHAPE.get(n["type"], ('["', '"]'))
-        tone = NODE_TONE.get(n["type"])
-        lines.append(f"  {nid}{open_}{_q(label)}{close}" + (f":::{tone}" if tone else ""))
-    for e in system["edges"]:
-        if e["from"] not in ids or e["to"] not in ids:
-            continue
-        style = e.get("style", "flow")
-        arrow = {"conditional": "-.->", "uses": "-.-", "data": "-.->", "handoff": "==>"}.get(style, "-->")
-        label = e.get("label") or ""
-        lines.append(f"  {ids[e['from']]} {arrow}{f'|{_q(label)}|' if label else ''} {ids[e['to']]}")
-    return f"---\ntitle: {system['name']}\n---\n" + "\n".join(lines) + "\n"
-
-
 PIPELINE_KIND = {"databricks-job": "job Databricks", "dlt": "Delta Live Tables", "dbt": "dbt", "airflow": "DAG Airflow"}
 AGENT_KIND = {
     "langgraph": "LangGraph", "crewai": "CrewAI", "agents": "agentes", "claude-agent-sdk": "Claude Agent SDK",
@@ -1893,7 +1879,10 @@ AGENT_KIND = {
 
 
 def modeling_docs(modeling: dict | None) -> list[dict]:
-    """The modelagem tab's documents: one DER (per schema when large), one per pipeline and per agent system."""
+    """The modelagem tab's documents: one DER (per schema when large) and one per pipeline.
+
+    Agent systems are not here: they are nodes of the map (`add_agents`).
+    """
     modeling = modeling or {}
     docs: list[dict] = []
     entities = modeling.get("entities") or []
@@ -1925,16 +1914,6 @@ def modeling_docs(modeling: dict | None) -> list[dict]:
             "title": pipe["name"], "format": "markdown", "group": "pipeline",
             "summary": f"{PIPELINE_KIND.get(pipe['kind'], pipe['kind'])} · {len(pipe['steps'])} etapas · {pipe['source']}",
             "text": pipeline_mermaid(pipe),
-        })
-    for system in modeling.get("agents") or []:
-        slug = _ID_RE.sub("-", system["id"]).strip("-").lower()[:60]
-        agents = sum(1 for n in system["nodes"] if n["type"] in ("agent", "orchestrator", "node", "task"))
-        tools = sum(1 for n in system["nodes"] if n["type"] in ("tool", "tools", "mcp"))
-        docs.append({
-            "name": f"modelagem/agentes-{slug}.mmd",
-            "title": system["name"], "format": "markdown", "group": "agents",
-            "summary": f"{AGENT_KIND.get(system['kind'], system['kind'])} · {agents} nós · {tools} ferramentas · {system['source']}",
-            "text": agents_mermaid(system),
         })
     return docs
 

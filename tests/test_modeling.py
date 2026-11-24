@@ -6,7 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from croqui.model import Graph, clean_layout
 from croqui.modeling import (
+    add_agents,
     build_modeling,
     load_yaml,
     medallion_layer,
@@ -244,13 +246,78 @@ class AgentTests(unittest.TestCase):
             self.assertEqual(build_modeling(root, build_registry(root))["agents"], [])
 
 
+class AgentMapTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.graph = Graph({})
+        add_agents(cls.graph, _model()["agents"])
+        cls.by_label = {n["label"]: n for n in cls.graph.nodes.values()}
+
+    def test_agents_and_tools_become_map_nodes(self) -> None:
+        triage = self.by_label["Triage agent"]
+        self.assertEqual((triage["kind"], triage["group"]), ("agent", "Triage agent"))
+        self.assertEqual(self.by_label["refund"]["kind"], "tool")
+        self.assertIn("triage.py", triage["meta"]["source"])
+
+    def test_handoffs_become_edges_and_start_end_are_left_out(self) -> None:
+        pairs = {(e["from"], e["to"]) for e in self.graph.edges}
+        self.assertIn((self.by_label["Triage agent"]["id"], self.by_label["Billing agent"]["id"]), pairs)
+        self.assertIn((self.by_label["Billing agent"]["id"], self.by_label["refund"]["id"]), pairs)
+        self.assertEqual(self.graph.drop_dangling_edges(), 0)
+        self.assertFalse([i for i in self.graph.nodes if "__start__" in i or "__end__" in i])
+
+
+class MigrationTests(unittest.TestCase):
+    """Foreign keys declared after the table: ALTER TABLE in a docker init script, Alembic revisions."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        root = Path(__file__).parent / "fixtures" / "migrations_app"
+        model = build_modeling(root, build_registry(root))
+        cls.entities = {e["id"]: e for e in model["entities"]}
+        cls.relations = {(r["from"], r["column"]): r["to"] for r in model["relations"] if r["confidence"] == "static"}
+
+    def test_alter_table_adds_keys_and_columns(self) -> None:
+        self.assertEqual(self.relations[("public.invoices", "account_id")], "public.accounts")
+        self.assertEqual(self.relations[("public.payments", "invoice_ref")], "public.invoices")
+        accounts = {c["name"]: c for c in self.entities["public.accounts"]["columns"]}
+        self.assertTrue(accounts["id"].get("pk"))
+
+    def test_alembic_revisions(self) -> None:
+        self.assertEqual(self.relations[("members", "team_id")], "teams")
+        self.assertEqual(self.relations[("members", "owner")], "members")
+        # op.add_column + op.create_foreign_key, in a later revision
+        self.assertEqual(self.relations[("badges", "holder")], "members")
+        teams = {c["name"]: c for c in self.entities["teams"]["columns"]}
+        self.assertTrue(teams["id"].get("pk"))
+
+
+class LayoutTests(unittest.TestCase):
+    def test_diagram_positions_survive_a_save(self) -> None:
+        clean = clean_layout({"diagrams": {
+            "modelagem/der.mmd": {"orders": {"x": 10, "y": 20.5, "junk": 1}, "bad": {"x": "1"}},
+            "empty": {}, "wrong": [1],
+        }})
+        self.assertEqual(clean["diagrams"], {"modelagem/der.mmd": {"orders": {"x": 10, "y": 20.5}}})
+        self.assertNotIn("diagrams", clean_layout({}))
+
+    def test_relation_bends_survive_a_save(self) -> None:
+        clean = clean_layout({"bends": {
+            "prd/a.md#1": {"orders>users>user_id": {"x": -40, "y": 12, "junk": 1}, "a>b>": 7, "c>d>": {"x": "1"}},
+            "empty": {},
+        }})
+        self.assertEqual(clean["bends"], {"prd/a.md#1": {"orders>users>user_id": {"x": -40, "y": 12}}})
+        self.assertNotIn("bends", clean_layout({}))
+
+
 class ViewTests(unittest.TestCase):
     def test_one_document_per_view(self) -> None:
         docs = modeling_docs(_model())
         groups = [d["group"] for d in docs]
         self.assertEqual(groups.count("der"), 1)
         self.assertEqual(groups.count("pipeline"), 4)
-        self.assertEqual(groups.count("agents"), 4)
+        # Agent systems are nodes of the map, not documents of this tab.
+        self.assertEqual(groups.count("agents"), 0)
         for doc in docs:
             self.assertTrue(doc["name"].startswith("modelagem/"))
             self.assertTrue(doc["text"].startswith("---\ntitle: "))
