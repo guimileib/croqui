@@ -126,6 +126,28 @@ class FastApiScanner:
         self.openapi: dict[tuple[str, str], dict] = {}
         self.warnings: list[str] = []
 
+    @staticmethod
+    def register_tables(root: Path, registry: TableRegistry) -> None:
+        """Register SQLAlchemy Core tables (``tb_x = Table("tb_x", metadata, …)``) and Alembic's version table."""
+        scanner = FastApiScanner(root, Graph({}), registry)
+        scanner._index_modules()
+        for module in scanner.modules.values():
+            for value in module.constants.values():
+                name = _core_table(value, module)
+                if name:
+                    registry.add(name, schema=scanner._core_schema(value, module), kind="table", source=f"{module.rel}:{value.lineno}")
+            if module.imports.get("context") != "alembic.context":
+                continue
+            for node in ast.walk(module.tree):
+                if isinstance(node, ast.Call) and _callee_name(node.func) == "configure":
+                    kwargs = {kw.arg: kw.value for kw in node.keywords}
+                    registry.add(
+                        scanner._str_value(kwargs.get("version_table"), module) or "alembic_version",
+                        schema=scanner._str_value(kwargs.get("version_table_schema"), module),
+                        kind="table",
+                        source=f"{module.rel}:{node.lineno}",
+                    )
+
     # ------------------------------------------------------------------- entry
 
     def scan(self) -> None:
@@ -488,10 +510,14 @@ class FastApiScanner:
 
         def strings(tree: ast.AST, where: _Module, fallback: int) -> None:
             for node in ast.walk(tree):
-                if isinstance(node, ast.Constant) and isinstance(node.value, str) and len(node.value) > 12:
-                    if not _looks_like_sql(node.value):
-                        continue
-                    for raw, op in _sql_refs(node.value):
+                if isinstance(node, ast.JoinedStr):
+                    value = self._fstring(node, where)
+                elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    value = node.value
+                else:
+                    continue
+                if len(value) > 12 and _looks_like_sql(value):
+                    for raw, op in _sql_refs(value):
                         record(raw, op, where, getattr(node, "lineno", fallback))
 
         # The body only. Decorators and parameter defaults are where FastAPI keeps
@@ -503,6 +529,7 @@ class FastApiScanner:
         ops_here: set[str] = set()
         models_here: set[str] = set()
         local_names = {a.arg for a in func.args.args + func.args.kwonlyargs}
+        statement_ops = _statement_ops(body_tree, module)
         strings(body_tree, module, func.lineno)
         for node in ast.walk(body_tree):
             if isinstance(node, ast.Call):
@@ -518,7 +545,11 @@ class FastApiScanner:
                     models_here.add(node.id)
                 elif node.id not in local_names:
                     found = self._project_constant(node.id, module)
-                    if found and ("const", f"{found[0].dotted}.{node.id}") not in seen:
+                    table = _core_table(found[1], found[0]) if found else None
+                    if table:
+                        # Anything but the statement built on it (`insert(tb_x)`) only reads it.
+                        record(table, statement_ops.get(id(node), "SELECT"), module, node.lineno)
+                    elif found and ("const", f"{found[0].dotted}.{node.id}") not in seen:
                         seen.add(("const", f"{found[0].dotted}.{node.id}"))
                         strings(found[1], found[0], getattr(found[1], "lineno", func.lineno))
         for model in models_here:
@@ -564,6 +595,35 @@ class FastApiScanner:
             if target and attr in target.constants:
                 return target, target.constants[attr]
         return None
+
+    def _str_value(self, node: ast.AST | None, module: _Module) -> str | None:
+        """A string literal, or a name bound to one here or in another project module."""
+        if isinstance(node, ast.Name):
+            found = self._project_constant(node.id, module)
+            node = found[1] if found else None
+        return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else None
+
+    def _fstring(self, node: ast.JoinedStr, module: _Module) -> str:
+        """``f"FROM {SCHEMA}.tb_x"`` with project constants filled in; any other value becomes ``_``."""
+        parts = []
+        for part in node.values:
+            value = part.value if isinstance(part, ast.FormattedValue) else part
+            parts.append(self._str_value(value, module) or "_")
+        return "".join(parts)
+
+    def _core_schema(self, table: ast.Call, module: _Module) -> str | None:
+        """``schema=`` on the table, else the one ``MetaData(schema=…)`` of its module."""
+        for kw in table.keywords:
+            if kw.arg == "schema":
+                return self._str_value(kw.value, module)
+        schemas = {
+            self._str_value(kw.value, module)
+            for node in ast.walk(module.tree)
+            if isinstance(node, ast.Call) and _callee_name(node.func) == "MetaData"
+            for kw in node.keywords
+            if kw.arg == "schema"
+        } - {None}
+        return schemas.pop() if len(schemas) == 1 else None
 
     def _add_table(self, qualified: str, info: dict) -> None:
         rec = info["record"]
@@ -612,6 +672,34 @@ def _callee_name(node: ast.AST) -> str | None:
     if isinstance(node, ast.Attribute):
         return node.attr
     return None
+
+
+def _core_table(value: ast.AST, module: _Module) -> str | None:
+    """The name in ``Table("tb_x", metadata, …)``, when ``Table`` is SQLAlchemy's."""
+    if not (isinstance(value, ast.Call) and value.args):
+        return None
+    if isinstance(value.func, ast.Name):
+        origin = module.imports.get(value.func.id, "")
+    elif isinstance(value.func, ast.Attribute) and isinstance(value.func.value, ast.Name):
+        origin = f"{module.imports.get(value.func.value.id, '')}.{value.func.attr}"
+    else:
+        return None
+    if not (origin.startswith("sqlalchemy") and origin.endswith(".Table")):
+        return None
+    name = value.args[0]
+    return name.value if isinstance(name, ast.Constant) and isinstance(name.value, str) else None
+
+
+def _statement_ops(tree: ast.AST, module: _Module) -> dict[int, str]:
+    """``insert(tb_x)``, ``pg_insert(tb_x)``, ``update(tb_x)``: the op applied to the name a statement is built on."""
+    out: dict[int, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Name):
+            callee = _callee_name(node.func) or ""
+            op = ORM_OPS.get(module.imports.get(callee, callee).rpartition(".")[2])
+            if op:
+                out[id(node.args[0])] = op
+    return out
 
 
 def _kwarg_str(call: ast.Call, name: str) -> str | None:
