@@ -13,9 +13,17 @@ from pathlib import Path
 DDL_RE = re.compile(
     r"CREATE\s+(?:OR\s+REPLACE\s+)?(TABLE|MATERIALIZED\s+VIEW|VIEW)\s+"
     r"(?:IF\s+NOT\s+EXISTS\s+)?"
-    r"(?:(?P<schema>[a-zA-Z_]\w*)\.)?(?P<name>[a-zA-Z_]\w*)",
+    r"(?:[`\"\[]?(?P<schema>[a-zA-Z_]\w*)[`\"\]]?\.)?[`\"\[]?(?P<name>[a-zA-Z_]\w*)",
     re.IGNORECASE,
 )
+# Migrations and dumps (pg_dump, Flyway, a docker init script) declare keys after
+# the table: `ALTER TABLE ONLY orders ADD CONSTRAINT … FOREIGN KEY … REFERENCES …;`.
+ALTER_RE = re.compile(
+    r"ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:ONLY\s+)?"
+    r"(?P<table>(?:[`\"\[]?[a-zA-Z_]\w*[`\"\]]?\.)?[`\"\[]?[a-zA-Z_]\w*[`\"\]]?)(?P<body>[^;]*)",
+    re.IGNORECASE,
+)
+ALTER_ADD_RE = re.compile(r"^ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?", re.I)
 TABLENAME_RE = re.compile(r"""__tablename__\s*=\s*["'](\w+)["']""")
 
 # Column parsing, for the panel that opens when you click a table. Everything here
@@ -250,6 +258,29 @@ def _ast_type(node: ast.AST) -> str | None:
     return None
 
 
+def _call_column(name: str, call: ast.Call) -> dict:
+    """One column from `Column(Integer, ForeignKey("t.id"), nullable=False)`."""
+    column = {"name": name, "type": None}
+    for arg in call.args:
+        rendered = _ast_type(arg)
+        if isinstance(arg, ast.Call) and _ast_type(arg.func) == "ForeignKey":
+            target = arg.args[0].value if arg.args and isinstance(arg.args[0], ast.Constant) else ""
+            # `ForeignKey("schema.table.column")`: everything but the column.
+            column["references"] = str(target).rsplit(".", 1)[0] or None
+        elif column["type"] is None and rendered and not isinstance(arg, ast.Constant):
+            column["type"] = rendered
+    for kw in call.keywords:
+        truthy = isinstance(kw.value, ast.Constant) and kw.value.value is True
+        falsy = isinstance(kw.value, ast.Constant) and kw.value.value is False
+        if kw.arg == "primary_key" and truthy:
+            column["pk"] = True
+        elif kw.arg == "nullable" and falsy:
+            column["required"] = True
+        elif kw.arg == "index" and truthy:
+            column["indexed"] = True
+    return column
+
+
 def _orm_columns(text: str) -> dict[str, list[dict]]:
     """Map ``__tablename__`` to its columns, parsed from the class body with ``ast``."""
     try:
@@ -273,30 +304,92 @@ def _orm_columns(text: str) -> dict[str, list[dict]]:
                 continue
             if _ast_type(value.func) not in ORM_COLUMN_CALLS:
                 continue
-            column = {"name": attr, "type": None}
-            for arg in value.args:
-                rendered = _ast_type(arg)
-                if isinstance(arg, ast.Call) and _ast_type(arg.func) == "ForeignKey":
-                    target = arg.args[0].value if arg.args and isinstance(arg.args[0], ast.Constant) else ""
-                    # `ForeignKey("schema.table.column")`: everything but the column.
-                    column["references"] = str(target).rsplit(".", 1)[0] or None
-                elif column["type"] is None and rendered and not isinstance(arg, ast.Constant):
-                    column["type"] = rendered
+            column = _call_column(attr, value)
             if column["type"] is None and isinstance(stmt, ast.AnnAssign):
                 column["type"] = _ast_type(stmt.annotation)
-            for kw in value.keywords:
-                truthy = isinstance(kw.value, ast.Constant) and kw.value.value is True
-                falsy = isinstance(kw.value, ast.Constant) and kw.value.value is False
-                if kw.arg == "primary_key" and truthy:
-                    column["pk"] = True
-                elif kw.arg == "nullable" and falsy:
-                    column["required"] = True
-                elif kw.arg == "index" and truthy:
-                    column["indexed"] = True
             columns.append(column)
         if table and columns:
             found[table] = columns
     return found
+
+
+def _strs(node: ast.AST | None) -> list[str]:
+    """`"a"` or `["a", "b"]` as a list of strings."""
+    items = node.elts if isinstance(node, (ast.List, ast.Tuple)) else [node]
+    return [i.value for i in items if isinstance(i, ast.Constant) and isinstance(i.value, str)]
+
+
+def _alembic_migration(text: str, rel: str, registry: TableRegistry) -> None:
+    """`op.create_table`, `op.add_column` and `op.create_foreign_key` in an Alembic migration."""
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return
+    calls = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        and isinstance(n.func.value, ast.Name) and n.func.value.id == "op"
+    ]
+    # Every table first: a later revision adds a column or a key to an earlier one.
+    for call in sorted(calls, key=lambda c: c.func.attr != "create_table"):
+        kwargs = {kw.arg: kw.value for kw in call.keywords}
+        names = _strs(call.args[0]) if call.args else []
+        if call.func.attr == "create_table" and names:
+            schema = (_strs(kwargs.get("schema")) or [None])[0]
+            columns, by_name = [], {}
+            for arg in call.args[1:]:
+                kind = _ast_type(arg.func) if isinstance(arg, ast.Call) else None
+                if kind == "Column" and arg.args and _strs(arg.args[0]):
+                    column = _call_column(_strs(arg.args[0])[0], arg)
+                    columns.append(column)
+                    by_name[column["name"]] = column
+                elif kind == "PrimaryKeyConstraint":
+                    for name in (s for a in arg.args for s in _strs(a)):
+                        by_name.get(name, {})["pk"] = True
+                elif kind == "ForeignKeyConstraint" and len(arg.args) >= 2:
+                    for local, remote in zip(_strs(arg.args[0]), _strs(arg.args[1])):
+                        by_name.get(local, {}).setdefault("references", remote.rsplit(".", 1)[0])
+            registry.add(names[0], schema=schema, kind="table", source=f"{rel}:{call.lineno}")
+            registry.set_columns(_key(names[0], schema), columns, authoritative=False)
+            continue
+        if call.func.attr == "add_column" and len(call.args) > 1 and isinstance(call.args[1], ast.Call):
+            rec = registry.resolve(names[0]) if names else None
+            column = call.args[1]
+            name = (_strs(column.args[0]) if column.args else [])[:1]
+            if rec and name and all(c["name"] != name[0] for c in rec["columns"]):
+                rec["columns"].append(_call_column(name[0], column))
+        elif call.func.attr == "create_foreign_key" and len(call.args) >= 4:
+            # op.create_foreign_key(name, source, referent, local_cols, remote_cols)
+            source, target = _strs(call.args[1]), _strs(call.args[2])
+            rec = registry.resolve(source[0]) if source and target else None
+            for col in rec["columns"] if rec else []:
+                if col["name"] in _strs(call.args[3]):
+                    col.setdefault("references", target[0])
+
+
+def _alter_tables(text: str, registry: TableRegistry) -> None:
+    """Columns and foreign keys an `ALTER TABLE` adds to a table already declared."""
+    for match in ALTER_RE.finditer(text):
+        rec = registry.resolve(re.sub(r'[`"\[\]]', "", match.group("table")))
+        if rec is None:
+            continue
+        by_name = {c["name"].lower(): c for c in rec["columns"]}
+        for part in _split_top_level(match.group("body")):
+            flat = " ".join(part.split())
+            fk = TABLE_FK_RE.search(flat)
+            if fk:
+                target = fk.group(2).replace('"', "").replace("`", "")
+                for col in fk.group(1).split(","):
+                    by_name.get(col.strip().strip('"`').lower(), {}).setdefault("references", target)
+                continue
+            pk = TABLE_PK_RE.search(flat)
+            for col in pk.group(1).split(",") if pk else []:
+                by_name.get(col.strip().strip('"`').lower(), {})["pk"] = True
+            added = ALTER_ADD_RE.match(flat)
+            for column in _ddl_columns(flat[added.end():]) if added else []:
+                if column["name"].lower() not in by_name and len(rec["columns"]) < MAX_COLUMNS:
+                    rec["columns"].append(column)
+                    by_name[column["name"].lower()] = column
 
 
 def build_registry(root: Path, *, code_suffixes: tuple[str, ...] = (".py",)) -> TableRegistry:
@@ -304,9 +397,11 @@ def build_registry(root: Path, *, code_suffixes: tuple[str, ...] = (".py",)) -> 
     registry = TableRegistry()
 
     # 1. DDL is the strongest signal: it carries schema and object kind.
+    ddl: list[str] = []
     for sql_file in _iter_files(root, (".sql",)):
         rel = sql_file.relative_to(root).as_posix()
         text = sql_file.read_text(encoding="utf-8", errors="replace")
+        ddl.append(text)
         for match in DDL_RE.finditer(text):
             kind = KIND_BY_DDL.get(" ".join(match.group(1).upper().split()), "table")
             registry.add(match.group("name"), schema=match.group("schema"), kind=kind, source=rel)
@@ -333,6 +428,14 @@ def build_registry(root: Path, *, code_suffixes: tuple[str, ...] = (".py",)) -> 
             schema = schema_m.group(1) if schema_m else None
             registry.add(m.group(1), schema=schema, kind="table", source=f"{rel}:{idx + 1}")
             registry.set_columns(_key(m.group(1), schema), by_table.get(m.group(1), []), authoritative=False)
+
+    # 2b. Migrations: Alembic revisions, then what any .sql alters after creating.
+    for code_file in _iter_files(root, tuple(s for s in code_suffixes if s == ".py")):
+        text = code_file.read_text(encoding="utf-8", errors="replace")
+        if "op.create_table" in text or "op.add_column" in text or "op.create_foreign_key" in text:
+            _alembic_migration(text, code_file.relative_to(root).as_posix(), registry)
+    for text in ddl:
+        _alter_tables(text, registry)
 
     # 3. Qualified references in code. These do not *prove* existence, but a
     #    schema-qualified tb_/mv_ token is specific enough to trust as a

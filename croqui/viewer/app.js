@@ -23,13 +23,15 @@
   "use strict";
 
   var SVG = "http://www.w3.org/2000/svg";
-  var COLS = ["entry", "route", "module", "service", "repo", "table", "external"];
+  var COLS = ["entry", "route", "module", "service", "agent", "tool", "repo", "table", "external"];
   var SIZE = {
     group: [304, 52],
     route: [304, 46],
     entry: [208, 46],
     module: [216, 48],
     service: [208, 42],
+    agent: [216, 46],
+    tool: [184, 46],
     repo: [208, 42],
     table: [196, 44],
     external: [168, 36],
@@ -429,8 +431,9 @@
       : { ax: acx, ay: a.y, bx: bcx, by: b.y + b.h, axis: "v", dir: -1 };
   }
 
-  /** Curve for a hand-made relation: heads, plus where its label goes. */
-  function sketchLink(p, seed, heads) {
+  /** Curve for a hand-made relation: heads, plus where its label goes.
+   *  `shift` ({x, y}) moves the middle of the curve (see the stage's bend knob). */
+  function sketchLink(p, seed, heads, shift) {
     var rand = seeded(seed);
     var horiz = p.axis === "h";
     var span = Math.abs(horiz ? p.bx - p.ax : p.by - p.ay);
@@ -438,14 +441,22 @@
     var sag = (rand() - 0.5) * 10;
     var c1 = horiz ? [p.ax + pull * p.dir, p.ay + sag] : [p.ax + sag, p.ay + pull * p.dir];
     var c2 = horiz ? [p.bx - pull * p.dir, p.by - sag] : [p.bx - sag, p.by - pull * p.dir];
-    var d = "M" + p.ax + "," + p.ay + "C" + c1[0] + "," + c1[1] +
-      " " + c2[0] + "," + c2[1] + " " + p.bx + "," + p.by;
+    var d = "M" + p.ax + "," + p.ay + "C" + c1[0] + "," + c1[1] + " ";
+    var via = null;
+    if (shift) {
+      // Two cubics meeting at the moved middle, crossing it parallel to A→B.
+      via = [(p.ax + p.bx) / 2 + shift.x, (p.ay + p.by) / 2 + shift.y];
+      var kx = (p.bx - p.ax) / 4, ky = (p.by - p.ay) / 4;
+      d += (via[0] - kx) + "," + (via[1] - ky) + " " + via[0] + "," + via[1] +
+        "C" + (via[0] + kx) + "," + (via[1] + ky) + " ";
+    }
+    d += c2[0] + "," + c2[1] + " " + p.bx + "," + p.by;
     if (heads !== "none") d += arrowHead(p.bx, p.by, Math.atan2(p.by - c2[1], p.bx - c2[0]), 8);
     if (heads === "both") d += arrowHead(p.ax, p.ay, Math.atan2(p.ay - c1[1], p.ax - c1[0]), 8);
     return {
       d: d,
       // The exact middle of a cubic, so the label never drifts off the curve.
-      mid: [
+      mid: via || [
         (p.ax + 3 * c1[0] + 3 * c2[0] + p.bx) / 8,
         (p.ay + 3 * c1[1] + 3 * c2[1] + p.by) / 8,
       ],
@@ -1131,12 +1142,13 @@
     // left to right the way the API map does.
     var lanes = [];
     COLS.forEach(function (kind) {
-      if (kind !== "module" || !buckets.module.length) { lanes.push({ kind: kind, list: buckets[kind] }); return; }
-      var rank = moduleRanks(buckets.module, visible);
+      // Agents hand off to agents the same way, so they get the same lanes.
+      if ((kind !== "module" && kind !== "agent") || !buckets[kind].length) { lanes.push({ kind: kind, list: buckets[kind] }); return; }
+      var rank = moduleRanks(buckets[kind], visible);
       var deepest = 0;
-      buckets.module.forEach(function (n) { deepest = Math.max(deepest, rank[n.id]); });
+      buckets[kind].forEach(function (n) { deepest = Math.max(deepest, rank[n.id]); });
       for (var r = 0; r <= deepest; r++) {
-        lanes.push({ kind: kind, list: buckets.module.filter(function (n) { return rank[n.id] === r; }) });
+        lanes.push({ kind: kind, list: buckets[kind].filter(function (n) { return rank[n.id] === r; }) });
       }
     });
 
@@ -1397,6 +1409,8 @@
     ["entry", "entradas", "var(--entry)"],
     ["module", "módulos", "var(--module)"],
     ["service", "serviços", "var(--service)"],
+    ["agent", "agentes", "var(--agent)"],
+    ["tool", "ferramentas", "var(--tool)"],
     ["repo", "repositórios", "var(--repo)"],
     ["table", "tabelas", "var(--table)"],
     ["external", "externos", "var(--external)"],
@@ -1651,6 +1665,14 @@
         var mn = svgEl("text", { class: "title", x: 11, y: 35, "font-size": 12.5, fill: "var(--ink)" });
         mn.textContent = truncate(node.label, Math.floor((box.w - 22) / 6.9));
         g.appendChild(mn);
+      } else if (node.kind === "agent" || node.kind === "tool") {
+        // The system it belongs to, over its name: two crews on one map stay apart.
+        var sys = svgEl("text", { x: 11, y: 17, "font-size": 10, fill: "var(--ink-faint)", "letter-spacing": "0.04em" });
+        sys.textContent = truncate(node.group || "", Math.floor((box.w - 22) / 5.8));
+        g.appendChild(sys);
+        var an = svgEl("text", { class: "title", x: 11, y: 35, "font-size": 12.5, fill: "var(--ink)" });
+        an.textContent = truncate(node.label, Math.floor((box.w - 22) / 6.9));
+        g.appendChild(an);
       } else if (node.kind === "table") {
         var sch = svgEl("text", { x: 11, y: 17, "font-size": 10, fill: "var(--ink-faint)", "letter-spacing": "0.05em" });
         sch.textContent = (node.meta.schema || "public") + (node.meta.object_kind === "matview" ? " · matview" : "");
@@ -2436,7 +2458,8 @@
   }
 
   function tagList(ops) {
-    return (ops || []).map(function (op) { return '<span class="tag ' + op + '">' + op + "</span>"; }).join("");
+    // Escaped: an agent edge carries a label read from the code, not a fixed verb.
+    return (ops || []).map(function (op) { return '<span class="tag ' + esc(op) + '">' + esc(op) + "</span>"; }).join("");
   }
 
   function esc(str) {
@@ -2642,6 +2665,8 @@
     if (m.request_body) rows.push(["request", m.request_body]);
     if (m.request_schema && m.request_schema.schema) rows.push(["body", m.request_schema.schema]);
     if (m.response_model) rows.push(["response", m.response_model]);
+    if (m.framework) rows.push(["framework", m.framework]);
+    if (m.role) rows.push(["papel", m.role]);
     if (m.schema) rows.push(["schema", m.schema]);
     if (m.object_kind) rows.push(["tipo", m.object_kind]);
     if (m.standalone) rows.push(["service", "nenhum (lógica inline)"]);
@@ -2949,7 +2974,11 @@
   }
 
   function restore(json) {
+    // Dragging a box on a diagram tab is not a history entry, so it outlives an undo.
+    var diagrams = state.layout.diagrams, bends = state.layout.bends;
     state.layout = normalizeLayout(JSON.parse(json));
+    if (diagrams) state.layout.diagrams = diagrams;
+    if (bends) state.layout.bends = bends;
     state.editing = null;
     if (state.sel && !findBy(state.sel.kind === "shape" ? shapes() : links(), state.sel.id)) state.sel = null;
     closePanel();
@@ -6031,14 +6060,14 @@
   var STAGE_MIN = 0.25, STAGE_MAX = 8;
 
   // The tabs that read documents rather than the map, in strip order. `modeling`
-  // is not a folder: scan derives it from the code (DER, pipelines, agents) and
+  // is not a folder: scan derives it from the code (DER, pipelines) and
   // the server turns it into diagrams, so it reads exactly like the UML tab.
   // `prd_model` is the DER each PRD carries in an erDiagram block, lifted out of the
   // prose onto a stage of its own: the data model the PRD *asks for*, next to the
   // one `modeling` reads from the code.
   var DOC_SECTIONS = ["prd", "prd_model", "uml", "modeling"];
   var TAB_NAMES = { map: "mapa", prd: "PRD", prd_model: "modelagem PRD", uml: "UML", modeling: "modelagem" };
-  var MODELING_GROUPS = { der: "modelo de dados", pipeline: "pipelines", agents: "agentes" };
+  var MODELING_GROUPS = { der: "modelo de dados", pipeline: "pipelines" };
 
   function docSections() {
     return DOC_SECTIONS.filter(function (k) { return (state.docs[k] || []).length; });
@@ -6107,8 +6136,8 @@
     el.docList.hidden = list.length < 2;
     var lastGroup = null;
     list.forEach(function (doc, i) {
-      // The modelagem tab mixes three kinds of picture; a heading per kind keeps
-      // the DER, the pipelines and the agents apart in the list.
+      // The modelagem tab mixes two kinds of picture; a heading per kind keeps
+      // the DER and the pipelines apart in the list.
       if (doc.group && doc.group !== lastGroup) {
         lastGroup = doc.group;
         var h = document.createElement("div");
@@ -6351,7 +6380,8 @@
       var svg = model.kind === "flowchart" ? drawFlow(model, stage)
         : model.kind === "er" ? drawEr(model, stage) : drawSequence(model, stage);
       if (stage) wrap.classList.add("full");
-      wrap.appendChild(stage ? diagramStage(svg, model) : svg);
+      if (stage) placeSaved(svg, name);
+      wrap.appendChild(stage ? diagramStage(svg, model, name) : svg);
       (model.warnings || []).forEach(function (w) { wrap.appendChild(note(w)); });
       return wrap;
     }
@@ -6371,6 +6401,31 @@
     ));
     wrap.appendChild(sourceBlock(model.source));
     return wrap;
+  }
+
+  /** A relation's name in layout.json (`bends`); it outlives a reordered file. */
+  function bendKey(e) {
+    return e.from + ">" + e.to + ">" + (e.label || "");
+  }
+
+  /** Put a staged diagram's boxes back where they were dragged to and saved. */
+  function placeSaved(svg, name) {
+    var flow = svg.__flow, saved = (state.layout.diagrams || {})[name];
+    if (!flow || !saved) return;
+    var world = svg.__world;
+    var x1 = world.x, y1 = world.y, x2 = world.x + world.w, y2 = world.y + world.h;
+    flow.model.nodes.forEach(function (n) {
+      var at = saved[n.id];
+      if (!at) return;
+      n.x = at.x; n.y = at.y;
+      flow.nodes[n.id].setAttribute("transform", "translate(" + n.x + "," + n.y + ")");
+      // The fit has to reach a box that was dragged off the original page.
+      x1 = Math.min(x1, n.x - DIAGRAM_PAD); y1 = Math.min(y1, n.y - DIAGRAM_PAD);
+      x2 = Math.max(x2, n.x + n.w + DIAGRAM_PAD); y2 = Math.max(y2, n.y + n.h + DIAGRAM_PAD);
+    });
+    flow.edges.forEach(function (item) { paintEdge(item, flow.byId); });
+    refitFrames(flow);
+    world.x = x1; world.y = y1; world.w = x2 - x1; world.h = y2 - y1;
   }
 
   function note(text) {
@@ -6428,7 +6483,7 @@
    * moving the window instead keeps a 400% zoom drawn by the same hand as a 100%
    * one.
    */
-  function diagramStage(svg, model) {
+  function diagramStage(svg, model, name) {
     var stage = document.createElement("div");
     stage.className = "dg-stage";
     var world = svg.__world;
@@ -6481,9 +6536,23 @@
      * rest of the selection), and navigating is Space + drag — or the middle
      * button — with the grabbing hand. A selection lights up its relations and
      * fades everything else, which is how you read one chain out of a dense
-     * diagram. Moves are for reading: the diagram is the .mmd file, and croqui
-     * does not rewrite it. */
+     * diagram. A move never rewrites the .mmd file: where a box was left goes
+     * to layout.json (`diagrams`), saved with the rest by Ctrl+S. */
     var flow = svg.__flow || null;
+    // A knob on the middle of each relation: drag it to bend the line.
+    // They sit above the boxes, so a line that runs behind one can be pulled out.
+    if (flow && name) {
+      var bends = (state.layout.bends || {})[name] || {};
+      var knobs = svgEl("g", { class: "dg-bends" });
+      svg.appendChild(knobs);
+      flow.edges.forEach(function (item, k) {
+        if (item.e.from === item.e.to) return;
+        item.bend = bends[bendKey(item.e)] || null;
+        item.knob = svgEl("circle", { class: "dg-bend", r: 6, "data-k": k });
+        knobs.appendChild(item.knob);
+        paintEdge(item, flow.byId);
+      });
+    }
     var picked = {};
     var hoverId = null;
     var mode = null;
@@ -6562,6 +6631,12 @@
         return;
       }
       var p = at(ev);
+      var knob = ev.target.closest ? ev.target.closest(".dg-bend") : null;
+      if (knob) {
+        var bent = flow.edges[knob.getAttribute("data-k")];
+        mode = { kind: "bend", item: bent, from: bent.bend || { x: 0, y: 0 }, sx: p.x, sy: p.y };
+        return;
+      }
       var id = nodeAt(ev);
       if (id) {
         if (ev.shiftKey) {
@@ -6608,6 +6683,14 @@
         moveNodes(mode.ids, Math.round(p.x - mode.sx), Math.round(p.y - mode.sy));
         return;
       }
+      if (mode.kind === "bend") {
+        var shift = { x: Math.round(mode.from.x + p.x - mode.sx), y: Math.round(mode.from.y + p.y - mode.sy) };
+        // Near the natural middle it snaps back to the automatic curve.
+        mode.item.bend = Math.hypot(shift.x, shift.y) < 6 ? null : shift;
+        mode.moved = true;
+        paintEdge(mode.item, flow.byId);
+        return;
+      }
       marquee.x2 = p.x; marquee.y2 = p.y; marquee.moved = true;
       var inside = drawMarquee();
       picked = {};
@@ -6623,6 +6706,24 @@
       mode = null;
       stage.classList.remove("panning", "moving");
       try { svg.releasePointerCapture(ev.pointerId); } catch (err) { /* already gone */ }
+      if (done.kind === "move" && name) {
+        var moved = done.ids.filter(function (id) {
+          return flow.byId[id].x !== done.origin[id].x || flow.byId[id].y !== done.origin[id].y;
+        });
+        if (moved.length) {
+          var all = state.layout.diagrams = state.layout.diagrams || {};
+          var kept = all[name] = all[name] || {};
+          moved.forEach(function (id) { kept[id] = { x: flow.byId[id].x, y: flow.byId[id].y }; });
+          markDirty();
+        }
+      }
+      if (done.kind === "bend" && done.moved) {
+        var bends = state.layout.bends = state.layout.bends || {};
+        var mine = bends[name] = bends[name] || {};
+        if (done.item.bend) mine[bendKey(done.item.e)] = done.item.bend;
+        else delete mine[bendKey(done.item.e)];
+        markDirty();
+      }
       if (done.kind === "sweep") {
         if (marquee && marquee.el) marquee.el.remove();
         // A click on bare paper drops the selection, as on every canvas.
@@ -6662,7 +6763,7 @@
     var tip = document.createElement("div");
     tip.className = "dg-tip";
     tip.textContent = flow
-      ? "arrastar: selecionar · arrastar nó: mover · espaço+arrastar: navegar · Esc: soltar"
+      ? "arrastar: selecionar · arrastar nó: mover" + (name ? " · arrastar ponto da ligação: dar forma" + savedHint() : "") + " · espaço+arrastar: navegar · Esc: soltar"
       : "espaço+arrastar: navegar · roda: zoom";
     stage.appendChild(svg);
     stage.appendChild(bar);
@@ -6785,10 +6886,15 @@
         " " + (x + 46) + "," + (y + 34) + " " + x + "," + (y + 8));
       return;
     }
-    var geo = sketchLink(anchorPair(a, b), hashCode(e.from + ">" + e.to + item.i), e.heads || "end");
+    var geo = sketchLink(anchorPair(a, b), hashCode(e.from + ">" + e.to + item.i), e.heads || "end", item.bend);
     item.path.setAttribute("d", geo.d);
+    var w = item.plate ? e.label.length * 6.2 + 12 : 0;
+    if (item.knob) {
+      // Just above the label, not on top of it.
+      item.knob.setAttribute("cx", geo.mid[0]);
+      item.knob.setAttribute("cy", geo.mid[1] - (w ? 16 : 0));
+    }
     if (item.plate) {
-      var w = e.label.length * 6.2 + 12;
       item.plate.setAttribute("x", geo.mid[0] - w / 2);
       item.plate.setAttribute("y", geo.mid[1] - 9);
       item.plate.setAttribute("width", w);

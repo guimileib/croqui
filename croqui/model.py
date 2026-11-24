@@ -59,7 +59,7 @@ def image_names(layout: dict) -> list[str]:
 
 
 # Node kinds, ordered — the viewer lays them out as columns in this order.
-KIND_ORDER = ("entry", "route", "module", "service", "repo", "table", "external")
+KIND_ORDER = ("entry", "route", "module", "service", "agent", "tool", "repo", "table", "external")
 
 # Edge kinds.
 CALLS = "calls"
@@ -73,8 +73,9 @@ class Graph:
         self.project = project
         self.nodes: dict[str, dict] = {}
         self._edges: dict[tuple[str, str, str], dict] = {}
-        # The modelagem tab: DER, pipelines and agents (see modeling.py). Not
-        # nodes of the map: they sit beside it, under their own key.
+        # The modelagem tab: DER and pipelines (see modeling.py). Not nodes of the
+        # map: they sit beside it, under their own key. Agent systems are kept
+        # here too, as read, and drawn on the map by `add_agents`.
         self.modeling: dict | None = None
 
     def add_node(self, node_id: str, kind: str, label: str, group: str | None = None, **meta) -> dict:
@@ -178,6 +179,38 @@ def clean_layout(payload: dict) -> dict:
         "shapes": payload.get("shapes") or [],
         "links": payload.get("links") or [],
     }
+    # Where the boxes of a staged diagram (modelagem, UML) were dragged to:
+    # {document name: {node id: {x, y}}}.
+    diagrams = payload.get("diagrams")
+    if isinstance(diagrams, dict):
+        kept = {
+            name: {
+                node: {"x": at["x"], "y": at["y"]}
+                for node, at in sorted(moved.items())
+                if isinstance(at, dict) and all(isinstance(at.get(k), (int, float)) for k in ("x", "y"))
+            }
+            for name, moved in sorted(diagrams.items())
+            if isinstance(moved, dict)
+        }
+        kept = {name: moved for name, moved in kept.items() if moved}
+        if kept:
+            clean["diagrams"] = kept
+    # How far the middle of a staged diagram's relation was dragged:
+    # {document name: {"from>to>label": {x, y}}}.
+    bends = payload.get("bends")
+    if isinstance(bends, dict):
+        kept = {
+            name: {
+                k: {"x": at["x"], "y": at["y"]}
+                for k, at in sorted(moved.items())
+                if isinstance(at, dict) and all(isinstance(at.get(c), (int, float)) for c in ("x", "y"))
+            }
+            for name, moved in sorted(bends.items())
+            if isinstance(moved, dict)
+        }
+        kept = {name: moved for name, moved in kept.items() if moved}
+        if kept:
+            clean["bends"] = kept
     # Reading state: which groups are open, where the camera sits, which filters
     # are on. Committed so a teammate opens the map the way you left it, and kept
     # out of the unsaved-edits comparison so panning never lights the save button.
